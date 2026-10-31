@@ -78,11 +78,23 @@ fn paste_via_clipboard(
     paste_delay_ms: u64,
     paste_delay_after_ms: u64,
 ) -> Result<(), String> {
+    // macOS: snapshot every pasteboard item/type and publish the transcript
+    // with a session marker, so the restore below is lossless and never
+    // overwrites something the user copied in the meantime.
+    #[cfg(target_os = "macos")]
+    let mac_session = crate::personal::pasteboard::PasteSession::begin(
+        &crate::personal::pasteboard_macos::MacPasteboard::general(),
+        text,
+    );
+
+    #[cfg(not(target_os = "macos"))]
     let clipboard = app_handle.clipboard();
+    #[cfg(not(target_os = "macos"))]
     let saved_text = clipboard.read_text().ok().filter(|t| !t.is_empty());
     // Only probe for an image when there is no text to restore. Text is by far the
     // common case, and reading an image decodes the full bitmap, so this keeps the
     // text path exactly as cheap as it was before.
+    #[cfg(not(target_os = "macos"))]
     let saved_image = if saved_text.is_none() {
         clipboard.read_image().ok().map(|image| image.to_owned())
     } else {
@@ -90,6 +102,7 @@ fn paste_via_clipboard(
     };
 
     // Write text to clipboard first
+    #[cfg(not(target_os = "macos"))]
     write_text_to_clipboard(app_handle, text)?;
 
     std::thread::sleep(Duration::from_millis(paste_delay_ms));
@@ -120,6 +133,16 @@ fn paste_via_clipboard(
         Ok(())
     })();
 
+    #[cfg(target_os = "macos")]
+    return finish_clipboard_paste(paste_result, paste_delay_after_ms, || {
+        let decision = mac_session.finish(
+            &crate::personal::pasteboard_macos::MacPasteboard::general(),
+            crate::personal::pasteboard::AfterPaste::RestorePrevious,
+        );
+        info!("Legacy paste clipboard restore: {:?}", decision);
+    });
+
+    #[cfg(not(target_os = "macos"))]
     finish_clipboard_paste(paste_result, paste_delay_after_ms, || {
         // Restore original clipboard content even when key injection failed.
         // Text takes priority so this path stays identical to the previous behavior;
@@ -798,7 +821,11 @@ fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool
 /// thread: it sleeps between steps (input injection hops via `with_enigo`).
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     let _paste = PASTE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let settings = get_settings(&app_handle);
+    // App profile for the paste target (auto-submit override).
+    let settings = crate::personal::profiles::for_paste(get_settings(&app_handle));
+
+    // Never paste into a password field without the user noticing.
+    crate::personal::paste_guard::check(&app_handle, &settings)?;
     let paste_method = settings.paste_method;
     let paste_delay_ms = settings.paste_delay_ms;
     let paste_delay_after_ms = settings.paste_delay_after_ms;

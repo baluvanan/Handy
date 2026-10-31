@@ -1,0 +1,17 @@
+/* Chart tokens for the Insights page (dataviz reference palette, slot 1).
+   Dark values are selected for the dark surface, not flipped. */
+.viz-root {
+  --viz-series-1: #2a78d6;
+  --viz-grid: var(--color-line);
+  --viz-text: var(--color-text);
+  --viz-text-muted: var(--color-ink-3);
+  --viz-surface: var(--color-background);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    --viz-series-1: #3987e5;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  --viz-series-1: #3987e5;
+}

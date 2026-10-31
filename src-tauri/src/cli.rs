@@ -61,4 +61,8 @@ pub struct CliArgs {
     /// Emit --transcribe-file results as JSON.
     #[arg(long)]
     pub json: bool,
+
+    /// Fork-only flags (Handy Personal): dataset export and speech analysis.
+    #[command(flatten)]
+    pub personal: crate::personal::cli::PersonalCliArgs,
 }

@@ -159,6 +159,18 @@ fn vad_keeps_speech_frames_only() {
 }
 
 #[test]
+fn the_timeline_records_where_speech_was_kept() {
+    let mut h = harness(VadPolicy::Offline);
+    // 16 kHz: four 4-sample frames are 1 ms of audio in total.
+    for frame in [[1.0; FRAME], [0.0; FRAME], [0.0; FRAME], [2.0; FRAME]] {
+        h.sink.process_chunk(chunk(&frame, FRAME));
+    }
+    let captured = h.sink.finish();
+    assert_eq!(captured.timeline.total_ms(), 1);
+    assert_eq!(captured.timeline.segments().len(), 2);
+}
+
+#[test]
 fn each_recording_resets_the_detector_with_its_policys_hangover() {
     let offline = harness(VadPolicy::Offline);
     assert_eq!(*offline.hangover.lock().unwrap(), Some(10));

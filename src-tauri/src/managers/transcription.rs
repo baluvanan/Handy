@@ -959,6 +959,7 @@ impl TranscriptionManager {
             return Ok(Transcription {
                 text: String::new(),
                 language: None,
+                trace: Default::default(),
             });
         }
 
@@ -970,7 +971,14 @@ impl TranscriptionManager {
         let language = outcome
             .setup
             .spoken_language(outcome.model_detected_language.as_deref());
+        // Raw ASR output, before any rule-based cleanup (dataset logging).
+        let raw_text = outcome.text.clone();
+        let cleanup_started = Instant::now();
         let final_result = finish_text(outcome, &settings);
+        let trace = crate::personal::dataset::AsrTrace {
+            raw_text,
+            cleanup_ms: cleanup_started.elapsed().as_millis() as u64,
+        };
 
         let translation_note = if settings.translate_to_english {
             " (translated)"
@@ -1002,6 +1010,7 @@ impl TranscriptionManager {
         Ok(Transcription {
             text: final_result,
             language: Some(language),
+            trace,
         })
     }
 
@@ -1186,6 +1195,8 @@ pub struct Transcription {
     /// The language it ran in and how that was chosen; `None` when there was
     /// no audio to run.
     pub language: Option<LanguageDecision>,
+    /// Raw model output and cleanup timing, for dataset logging.
+    pub trace: crate::personal::dataset::AsrTrace,
 }
 
 /// What one transcription decoded (live or in batch), with how its runs were
@@ -1320,6 +1331,8 @@ fn run_setup(info: &LoadedInfo, settings: &AppSettings, language: LanguageDecisi
         vocabulary: vocabulary_for_model(info.supports_vocabulary, &settings.custom_words),
         ..Default::default()
     };
+    let run_options =
+        crate::personal::verbatim::apply(run_options, info.supports_initial_prompt, settings);
 
     debug!(
         "transcribe-cpp run: task={:?}, language={:?}, vocabulary_terms={}",

@@ -8,6 +8,7 @@ use crate::managers::model::ModelManager;
 use crate::managers::transcription::policy::{live_decode, LiveDecode, ModelTraits};
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::{Transcription, TranscriptionManager};
+use crate::personal::{self, paste_guard};
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -245,7 +246,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     // Ask these providers to skip reasoning/thinking — post-processing rarely
     // benefits from it and it adds seconds of latency. llm_client picks the
     // field the endpoint understands and retries without it if rejected.
-    let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter");
+    let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter" | "lmstudio");
 
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
@@ -405,6 +406,8 @@ pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
+    /// Why the LLM result was not used, when post-processing was requested.
+    pub llm_fallback: Option<personal::lmstudio::FallbackReason>,
 }
 
 pub(crate) async fn process_transcription_output(
@@ -412,13 +415,31 @@ pub(crate) async fn process_transcription_output(
     transcription: &str,
     post_process: bool,
 ) -> ProcessedTranscription {
-    let settings = get_settings(app);
+    process_transcription_output_with(app, transcription, post_process, None).await
+}
+
+/// `prompt_override`: an app profile's prompt, used instead of the selected one.
+pub(crate) async fn process_transcription_output_with(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+    prompt_override: Option<String>,
+) -> ProcessedTranscription {
+    let mut settings = get_settings(app);
+    if prompt_override.is_some() {
+        settings.post_process_selected_prompt_id = prompt_override;
+    }
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
+    let mut llm_fallback = None;
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        // Never let a down or slow LLM fail (or stall) the dictation.
+        let llm = post_process_transcription(&settings, &final_text);
+        let guarded =
+            personal::lmstudio::post_process_guarded(app, &settings, llm, &mut llm_fallback);
+        if let Some(processed_text) = guarded.await {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -438,6 +459,7 @@ pub(crate) async fn process_transcription_output(
         final_text,
         post_processed_text,
         post_process_prompt,
+        llm_fallback,
     }
 }
 
@@ -629,6 +651,7 @@ impl ShortcutAction for TranscribeAction {
         shortcut::unregister_cancel_shortcut(app);
 
         let stop_time = Instant::now();
+        let stop_ctx = personal::dataset::StopContext::now();
         debug!("TranscribeAction::stop called for binding: {}", binding_id);
 
         let ah = app.clone();
@@ -658,7 +681,13 @@ impl ShortcutAction for TranscribeAction {
         play_feedback_sound(app, SoundType::Stop);
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
-        let post_process = self.post_process;
+                                                 // Per-app profile: may force the LLM on/off and pick its prompt.
+        let llm_plan = personal::profiles::llm_plan(
+            &get_settings(app),
+            stop_ctx.app_bundle_id.as_deref(),
+            self.post_process,
+        );
+        let post_process = llm_plan.post_process;
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -712,6 +741,7 @@ impl ShortcutAction for TranscribeAction {
                     // as an error, so it never starts a batch run.
                     let transcription_time = Instant::now();
                     let transcription_result = tm.transcribe_recording(samples);
+                    let transcribe_elapsed = transcription_time.elapsed();
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {
@@ -748,6 +778,7 @@ impl ShortcutAction for TranscribeAction {
                         Ok(Transcription {
                             text: transcription,
                             language,
+                            trace,
                         }) => {
                             debug!(
                                 "Transcription completed in {:?}: '{}'",
@@ -762,8 +793,14 @@ impl ShortcutAction for TranscribeAction {
                                     show_processing_overlay(&ah);
                                 }
                             }
+                            let llm_started = Instant::now();
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                process_transcription_output_with(
+                                    &ah,
+                                    &transcription,
+                                    post_process,
+                                    llm_plan.prompt_override.clone(),
+                                ),
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await
@@ -781,6 +818,24 @@ impl ShortcutAction for TranscribeAction {
                                 return;
                             }
 
+                            let dataset = personal::dataset::capture(
+                                &ah,
+                                &stop_ctx,
+                                personal::dataset::Processed {
+                                    audio_file: wav_saved.then(|| file_name.clone()),
+                                    sample_count,
+                                    trace: &trace,
+                                    rule_cleaned_text: &transcription,
+                                    llm_text: processed.post_processed_text.as_deref(),
+                                    llm_fallback_reason: processed.llm_fallback.map(|r| r.as_str()),
+                                    final_text: &processed.final_text,
+                                    language: language.as_ref(),
+                                    post_process_requested: post_process,
+                                    transcribe_elapsed,
+                                    llm_elapsed: post_process.then(|| llm_started.elapsed()),
+                                },
+                            );
+
                             // Save to history if WAV was saved
                             if wav_saved {
                                 if let Err(err) = hm.save_entry(
@@ -796,6 +851,9 @@ impl ShortcutAction for TranscribeAction {
                             }
 
                             if processed.final_text.is_empty() {
+                                if let Some(pending) = dataset {
+                                    pending.finish(&ah, "empty", None);
+                                }
                                 utils::hide_recording_overlay(&ah);
                                 set_tray_state(&ah, TrayIconState::Idle);
                                 emit_transcription_complete(
@@ -837,10 +895,18 @@ impl ShortcutAction for TranscribeAction {
                                                 }
                                                 Err(e) => {
                                                     error!("Failed to paste transcription: {}", e);
-                                                    let _ = ah_clone.emit("paste-error", ());
+                                                    paste_guard::emit_paste_error(&ah_clone, &e);
                                                     TranscriptionOutcome::Failed
                                                 }
                                             };
+                                        if let Some(pending) = dataset {
+                                            let label = paste_guard::outcome_label(outcome);
+                                            pending.finish(
+                                                &ah_clone,
+                                                label,
+                                                Some(paste_time.elapsed()),
+                                            );
+                                        }
                                         // A new session may have started while
                                         // this paste ran; the UI is now its.
                                         if RECORDING_SESSION.load(Ordering::SeqCst) == session {

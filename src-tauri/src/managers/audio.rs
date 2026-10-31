@@ -952,6 +952,7 @@ impl AudioRecordingManager {
                     );
                 }
                 let captured = stopped.sink.finish();
+                crate::personal::dataset::set_last_timeline(captured.timeline);
                 self.return_vad(captured.vad);
                 self.last_input_silent
                     .store(captured.input_silent, Ordering::Release);

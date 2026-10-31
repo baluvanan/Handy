@@ -18,6 +18,7 @@ mod managers;
 mod memory;
 mod overlay;
 mod paste_tx;
+mod personal;
 pub mod portable;
 mod secure_input;
 mod settings;
@@ -30,6 +31,7 @@ mod tray_i18n;
 mod utils;
 
 pub use cli::CliArgs;
+pub use personal::cli::PersonalCliArgs;
 #[cfg(debug_assertions)]
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -679,6 +681,10 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_paste_delay_ms_setting,
             shortcut::change_paste_delay_after_ms_setting,
             shortcut::change_reliable_paste_setting,
+            personal::settings::update_personal_settings,
+            personal::insights::get_speech_insights,
+            personal::insights::generate_coaching_note,
+            personal::profiles::get_recent_app_ids,
             shortcut::change_paste_method_setting,
             shortcut::get_available_typing_tools,
             shortcut::change_typing_tool_setting,
@@ -793,6 +799,7 @@ pub fn run(cli_args: CliArgs) {
             managers::transcription::StreamPhaseEvent,
             transcription_coordinator::RecordingStateEvent,
             actions::TranscriptionCompleteEvent,
+            personal::notice::PersonalNotice,
         ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
@@ -807,8 +814,10 @@ pub fn run(cli_args: CliArgs) {
 
     // The headless path must run as its own instance (see the single-instance
     // note below), not forward to an already-running app.
-    let headless_mode =
-        cli_args.transcribe_file.is_some() || cli_args.list_devices || cli_args.list_models;
+    let headless_mode = cli_args.transcribe_file.is_some()
+        || cli_args.list_devices
+        || cli_args.list_models
+        || cli_args.personal.is_headless();
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
@@ -929,6 +938,10 @@ pub fn run(cli_args: CliArgs) {
             // thread and exit. Deliberately skips the window, tray, overlay, audio
             // recorder (so it never opens the mic, even with always_on_microphone),
             // signal handlers, and autostart that initialize_core_logic sets up.
+            if cli_args.personal.is_headless() {
+                personal::cli::spawn_and_exit(app.handle().clone(), cli_args.personal.clone());
+                return Ok(());
+            }
             if headless_mode {
                 let app_handle = app.handle().clone();
                 let model_manager = Arc::new(

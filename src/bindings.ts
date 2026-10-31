@@ -189,6 +189,53 @@ async changeReliablePasteSetting(enabled: boolean) : Promise<Result<null, string
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Replaces the fork's settings block in one go.
+ */
+async updatePersonalSettings(personal: PersonalSettings) : Promise<Result<PersonalSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_personal_settings", { personal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Speech metrics per day and week for the Insights page. `since_days`
+ * limits to the last N days (all time when `None`).
+ */
+async getSpeechInsights(sinceDays: number | null) : Promise<Result<InsightsReport, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_speech_insights", { sinceDays }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks the configured post-processing LLM for a short coaching note based
+ * on the last two weeks of aggregate metrics.
+ */
+async generateCoachingNote() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("generate_coaching_note") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Distinct bundle ids seen in the dataset, most recent first, so the
+ * profile editor can offer them (Handy itself is frontmost while editing).
+ */
+async getRecentAppIds() : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_recent_app_ids") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changePasteMethodSetting(method: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_paste_method_setting", { method }) };
@@ -1035,6 +1082,7 @@ async isLaptop() : Promise<Result<boolean, string>> {
 
 export const events = __makeEvents__<{
 historyUpdatePayload: HistoryUpdatePayload,
+personalNotice: PersonalNotice,
 recordingStateEvent: RecordingStateEvent,
 streamPhaseEvent: StreamPhaseEvent,
 streamTextEvent: StreamTextEvent,
@@ -1042,6 +1090,7 @@ transcriptionCompleteEvent: TranscriptionCompleteEvent,
 transcriptionJob: TranscriptionJob
 }>({
 historyUpdatePayload: "history-update-payload",
+personalNotice: "personal-notice",
 recordingStateEvent: "recording-state-event",
 streamPhaseEvent: "stream-phase-event",
 streamTextEvent: "stream-text-event",
@@ -1055,6 +1104,44 @@ transcriptionJob: "transcription-job"
 
 /** user-defined types **/
 
+/**
+ * Metrics for a set of dictations.
+ */
+export type Aggregate = { dictations: number; words: number; 
+/**
+ * Seconds of detected speech.
+ */
+speech_seconds: number; 
+/**
+ * Seconds of recording (speech + pauses).
+ */
+recording_seconds: number; 
+/**
+ * Words per minute of speech (articulation rate).
+ */
+words_per_minute: number; 
+/**
+ * Words per minute of recording (including pauses).
+ */
+words_per_minute_overall: number; fillers: CountRate; fillers_by_word: Partial<{ [key in string]: CountRate }>; pauses: PauseStats; false_starts: CountRate; repeated_words: CountRate; hedges: CountRate; hedges_by_phrase: Partial<{ [key in string]: CountRate }>; unique_words: number; type_token_ratio: number; mattr: number }
+export type AppProfile = { 
+/**
+ * Display name.
+ */
+name: string; 
+/**
+ * Bundle id, e.g. `com.tinyspeck.slackmacgap`. A trailing `*` matches a
+ * prefix (`com.jetbrains.*`). Case-insensitive.
+ */
+bundle_id: string; llm: ProfileLlm; 
+/**
+ * Prompt to use when the LLM runs here; `None` keeps the selected one.
+ */
+prompt_id: string | null; 
+/**
+ * Auto-submit override; `None` keeps the global setting.
+ */
+auto_submit: boolean | null; enabled: boolean }
 /**
  * The container-level `serde(default)` (backed by the `Default` impl below)
  * guarantees every field — including ones added in the future — falls back to
@@ -1102,9 +1189,10 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  */
 spoken_languages?: string[]; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; theme?: Theme; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; paste_delay_after_ms?: number; 
 /**
- * Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
- * after the target app actually reads the transcript, instead of after a
- * fixed delay. See `paste_tx`. macOS and Windows only.
+ * Receipt-sequenced paste: restore the clipboard only after the target
+ * app actually reads the transcript, instead of after a fixed delay. See
+ * `paste_tx`. macOS and Windows only; on by default on macOS (fork), the
+ * legacy timed path stays selectable as a fallback.
  */
 reliable_paste?: boolean; typing_tool?: TypingTool; external_script_path?: string | null; filler_word_removal_enabled?: boolean; custom_filler_words?: string[] | null; 
 /**
@@ -1138,7 +1226,11 @@ language_detection_window_secs?: number;
  * not gated on this — that follows model capability. Migrated from the old
  * `overlay_position` (position `none` → style `None`).
  */
-overlay_style?: OverlayStyle }
+overlay_style?: OverlayStyle; 
+/**
+ * Fork-only settings (Handy Personal); see `personal::settings`.
+ */
+personal?: PersonalSettings }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AutoUnavailableReason = 
@@ -1174,6 +1266,7 @@ export type ChineseScript =
  */
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
+export type CountRate = { count: number; per_minute: number }
 export type CustomSounds = { start: boolean; stop: boolean }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; 
@@ -1199,6 +1292,15 @@ export type ImplementationChangeResult = { success: boolean;
  * List of binding IDs that were reset to defaults due to incompatibility
  */
 reset_bindings: string[] }
+export type InsightsReport = { 
+/**
+ * Unix seconds.
+ */
+generated_at: number; 
+/**
+ * Unix seconds; `None` for all time.
+ */
+since: number | null; totals: Aggregate; days: PeriodAggregate[]; weeks: PeriodAggregate[] }
 export type KeyboardDiagnosticReport = { secure_input_enabled: boolean; culprit_pid: number | null; culprit_name: string | null; 
 /**
  * Counts only — key identity is deliberately never captured.
@@ -1302,7 +1404,70 @@ export type OverlayPosition = "top" | "bottom"
 export type OverlayStyle = "none" | "minimal" | "live"
 export type PaginatedHistory = { entries: HistoryEntry[]; has_more: boolean }
 export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_shift_v" | "external_script"
+export type PauseStats = { count: number; mean_ms: number; median_ms: number; p90_ms: number; longest_ms: number; 
+/**
+ * Counts per bucket: <1 s, 1–2 s, 2–5 s, ≥5 s.
+ */
+buckets: number[]; per_minute: number }
+export type PeriodAggregate = { 
+/**
+ * `YYYY-MM-DD` (day) or `YYYY-Www` (ISO week).
+ */
+period: string; 
+/**
+ * First day of the period, `YYYY-MM-DD`.
+ */
+start_date: string; metrics: Aggregate }
 export type PermissionAccess = "allowed" | "denied" | "unknown"
+export type PersonalNotice = { kind: PersonalNoticeKind; 
+/**
+ * Technical detail for the toast description (never transcript text).
+ */
+detail: string | null }
+export type PersonalNoticeKind = 
+/**
+ * Nothing was pasted because a password field had focus.
+ */
+"paste_blocked_secure_field" | 
+/**
+ * The cleanup LLM was unreachable or too slow; rule-cleaned text was
+ * pasted instead.
+ */
+"llm_fallback"
+/**
+ * Container-level `serde(default)`: any field missing from a stored settings
+ * object falls back to its default, so adding fields never breaks a load.
+ */
+export type PersonalSettings = { 
+/**
+ * Refuse to paste while a secure (password) text field is focused, or
+ * while macOS Secure Event Input is on. The transcript stays in History
+ * and a notice explains why nothing was pasted.
+ */
+block_paste_in_secure_fields: boolean; 
+/**
+ * Log every dictation (raw ASR text, cleanup stages, timings, VAD
+ * segments, frontmost app) to the dataset table and keep its audio.
+ */
+dataset_logging_enabled: boolean; 
+/**
+ * Prompt Whisper with fillers so disfluencies survive in the raw
+ * transcript (see `personal::verbatim`).
+ */
+verbatim_mode: boolean; 
+/**
+ * The verbatim initial prompt; empty uses the built-in default.
+ */
+verbatim_prompt: string; 
+/**
+ * Budget for LLM post-processing (health check + call). Past it, the
+ * rule-cleaned text is pasted instead.
+ */
+llm_timeout_ms: number; 
+/**
+ * Per-app behaviour keyed on the frontmost app's bundle id.
+ */
+app_profiles: AppProfile[] }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.
@@ -1317,6 +1482,23 @@ export type PostProcessApiFormat =
  */
 "anthropic"
 export type PostProcessProvider = { id: string; label: string; base_url: string; allow_base_url_edit?: boolean; models_endpoint?: string | null; supports_structured_output?: boolean; api_format?: PostProcessApiFormat }
+/**
+ * What a profile does about LLM post-processing.
+ */
+export type ProfileLlm = 
+/**
+ * As configured: the LLM runs only for the post-processing shortcut.
+ */
+"default" | 
+/**
+ * Never run the LLM in this app (e.g. terminals), whatever the shortcut.
+ */
+"off" | 
+/**
+ * Always run the LLM in this app, even on the plain shortcut (when
+ * post-processing is enabled at all).
+ */
+"always"
 /**
  * Recording phase events for windows that follow along (onboarding's Try it).
  */

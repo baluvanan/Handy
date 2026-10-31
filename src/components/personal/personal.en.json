@@ -1,0 +1,110 @@
+{
+  "notices": {
+    "pasteBlockedSecureField": {
+      "title": "Not pasted into a password field",
+      "description": "A secure text field had focus. The transcript is in History."
+    },
+    "llmFallback": {
+      "title": "Cleanup LLM unavailable",
+      "description": "Pasted the rule-cleaned text instead."
+    }
+  },
+  "settings": {
+    "groupTitle": "Handy Personal",
+    "reliablePaste": {
+      "title": "Reliable Paste",
+      "description": "Restore your clipboard only after the target app has read the transcript, and restore every item and format exactly. Turn off to use the legacy timed paste as a fallback. macOS and Windows only."
+    },
+    "blockSecureFields": {
+      "title": "Never paste into password fields",
+      "description": "When a secure text field has focus (or macOS Secure Input is on), skip the paste and show a notice instead. The transcript stays in History."
+    },
+    "datasetLogging": {
+      "title": "Log dictations for training & analysis",
+      "description": "Keep every dictation's raw model output, cleaned text, LLM text, timings, pauses and frontmost app in the local dataset, with its audio. Export with `handy --export-dataset <dir>`. Nothing leaves this Mac."
+    },
+    "verbatim": {
+      "title": "Verbatim transcription",
+      "description": "Prompt Whisper models with filler words so ums, uhs and false starts are kept in the raw transcript. Filler removal still cleans the pasted text. Whisper models only."
+    },
+    "verbatimPrompt": {
+      "title": "Verbatim prompt",
+      "description": "Initial prompt given to Whisper in verbatim mode. Leave empty for the default."
+    },
+    "llmTimeout": {
+      "title": "LLM timeout",
+      "description": "If the LLM (e.g. LM Studio) is unreachable or takes longer than this, the rule-cleaned text is pasted instead and a small notice is shown. Dictation never fails because the LLM is down.",
+      "unit": "seconds"
+    }
+  },
+  "insights": {
+    "sidebar": "Insights",
+    "title": "Speech insights",
+    "subtitle": "From your raw dictations (before cleanup). Computed locally.",
+    "empty": "No dictations in this range yet.",
+    "range": {
+      "days": "{{count}}d",
+      "all": "All"
+    },
+    "granularity": {
+      "day": "Daily",
+      "week": "Weekly"
+    },
+    "metrics": {
+      "wpm": "Speaking rate",
+      "fillers": "Fillers",
+      "medianPause": "Median pause",
+      "dictations": "Dictations",
+      "hedges": "Hedges",
+      "restarts": "False starts & repeats",
+      "pauses": "Median pause length",
+      "variety": "Vocabulary variety"
+    },
+    "units": {
+      "wpm": "wpm",
+      "perMin": "/ min",
+      "per100": "/ 100 words",
+      "seconds": "s",
+      "mattr": "MATTR",
+      "words": "{{count}} words"
+    },
+    "breakdown": {
+      "fillers": "Fillers by word",
+      "hedges": "Hedge phrases",
+      "pauses": "Pause lengths"
+    },
+    "coaching": {
+      "title": "Weekly coaching note",
+      "description": "Sends this week's and last week's aggregate numbers (never your transcripts) to your post-processing LLM.",
+      "button": "Get note",
+      "busy": "Thinking…"
+    },
+    "table": {
+      "show": "Show as table",
+      "hide": "Hide table",
+      "period": "Period",
+      "fillersPerMin": "Fillers/min",
+      "hedgesPer100": "Hedges/100w",
+      "medianPause": "Median pause (s)"
+    }
+  },
+  "profiles": {
+    "title": "App profiles",
+    "description": "Matched on the frontmost app's bundle id (a trailing * matches a prefix). \"Always\" runs the LLM with the profile's prompt even on the plain shortcut, when post-processing is enabled. Recently used apps are suggested in the bundle id field.",
+    "name": "Name",
+    "llm": "LLM",
+    "prompt": "Prompt",
+    "autoSubmit": "Auto-submit",
+    "llmModes": {
+      "default": "LLM: as configured",
+      "off": "LLM: never",
+      "always": "LLM: always"
+    },
+    "selectedPrompt": "Selected prompt",
+    "autoSubmitDefault": "Auto-submit: as configured",
+    "autoSubmitOn": "Auto-submit: on",
+    "autoSubmitOff": "Auto-submit: off",
+    "remove": "Remove",
+    "add": "Add profile"
+  }
+}
