@@ -4,6 +4,8 @@
 //! it) so upstream merges only ever touch a handful of hook lines in existing
 //! files. Each submodule documents the upstream call sites it relies on.
 
+pub mod cli;
+pub mod dataset;
 pub mod focus;
 pub mod notice;
 pub mod paste_guard;
@@ -11,6 +13,8 @@ pub mod pasteboard;
 #[cfg(target_os = "macos")]
 pub mod pasteboard_macos;
 pub mod settings;
+pub mod timeline;
+pub mod verbatim;
 
 /// This fork never self-updates: an upstream release must never overwrite it,
 /// and builds carry no updater signing key. Forces update checks off exactly

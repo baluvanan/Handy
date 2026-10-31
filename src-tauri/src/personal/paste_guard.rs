@@ -4,6 +4,8 @@
 //! and `actions.rs` (to suppress the generic paste-error toast in favour of a
 //! specific notice).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Emitter};
 
 use super::notice::{self, PersonalNoticeKind};
@@ -31,10 +33,26 @@ pub fn check(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
         super::focus::secure_field_focused(),
     ) {
         log::info!("Not pasting: a secure text field / secure input is active");
+        LAST_PASTE_BLOCKED.store(true, Ordering::Release);
         notice::emit(app, PersonalNoticeKind::PasteBlockedSecureField, None);
         return Err(PASTE_BLOCKED_SECURE_FIELD.to_string());
     }
     Ok(())
+}
+
+static LAST_PASTE_BLOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Dataset label for a finished paste: `blocked` when the guard refused it.
+pub fn outcome_label(outcome: crate::actions::TranscriptionOutcome) -> &'static str {
+    use crate::actions::TranscriptionOutcome as O;
+    if LAST_PASTE_BLOCKED.swap(false, Ordering::AcqRel) {
+        return "blocked";
+    }
+    match outcome {
+        O::Typed => "typed",
+        O::Empty | O::Silent => "empty",
+        O::Failed => "failed",
+    }
 }
 
 pub fn is_blocked_error(error: &str) -> bool {

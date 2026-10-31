@@ -1346,7 +1346,21 @@ export type PersonalSettings = {
  * while macOS Secure Event Input is on. The transcript stays in History
  * and a notice explains why nothing was pasted.
  */
-block_paste_in_secure_fields: boolean }
+block_paste_in_secure_fields: boolean; 
+/**
+ * Log every dictation (raw ASR text, cleanup stages, timings, VAD
+ * segments, frontmost app) to the dataset table and keep its audio.
+ */
+dataset_logging_enabled: boolean; 
+/**
+ * Prompt Whisper with fillers so disfluencies survive in the raw
+ * transcript (see `personal::verbatim`).
+ */
+verbatim_mode: boolean; 
+/**
+ * The verbatim initial prompt; empty uses the built-in default.
+ */
+verbatim_prompt: string }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.

@@ -16,12 +16,23 @@ pub struct PersonalSettings {
     /// while macOS Secure Event Input is on. The transcript stays in History
     /// and a notice explains why nothing was pasted.
     pub block_paste_in_secure_fields: bool,
+    /// Log every dictation (raw ASR text, cleanup stages, timings, VAD
+    /// segments, frontmost app) to the dataset table and keep its audio.
+    pub dataset_logging_enabled: bool,
+    /// Prompt Whisper with fillers so disfluencies survive in the raw
+    /// transcript (see `personal::verbatim`).
+    pub verbatim_mode: bool,
+    /// The verbatim initial prompt; empty uses the built-in default.
+    pub verbatim_prompt: String,
 }
 
 impl Default for PersonalSettings {
     fn default() -> Self {
         Self {
             block_paste_in_secure_fields: true,
+            dataset_logging_enabled: true,
+            verbatim_mode: false,
+            verbatim_prompt: super::verbatim::DEFAULT_VERBATIM_PROMPT.to_string(),
         }
     }
 }

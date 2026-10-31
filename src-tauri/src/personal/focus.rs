@@ -4,7 +4,6 @@
 
 /// The frontmost application's bundle identifier (macOS), e.g.
 /// `com.tinyspeck.slackmacgap`. `None` elsewhere or when unknown.
-#[allow(dead_code)] // TEMP: wired up by dataset logging
 pub fn frontmost_app_id() -> Option<String> {
     imp::frontmost_app_id()
 }
@@ -104,7 +103,6 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    #[allow(dead_code)] // TEMP: wired up by dataset logging
     pub fn frontmost_app_id() -> Option<String> {
         None
     }

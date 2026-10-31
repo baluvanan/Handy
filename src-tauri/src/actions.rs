@@ -8,7 +8,7 @@ use crate::managers::model::ModelManager;
 use crate::managers::transcription::policy::{live_decode, LiveDecode, ModelTraits};
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::{Transcription, TranscriptionManager};
-use crate::personal::paste_guard;
+use crate::personal::{self, paste_guard};
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -630,6 +630,7 @@ impl ShortcutAction for TranscribeAction {
         shortcut::unregister_cancel_shortcut(app);
 
         let stop_time = Instant::now();
+        let stop_ctx = personal::dataset::StopContext::now();
         debug!("TranscribeAction::stop called for binding: {}", binding_id);
 
         let ah = app.clone();
@@ -713,6 +714,7 @@ impl ShortcutAction for TranscribeAction {
                     // as an error, so it never starts a batch run.
                     let transcription_time = Instant::now();
                     let transcription_result = tm.transcribe_recording(samples);
+                    let transcribe_elapsed = transcription_time.elapsed();
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {
@@ -749,6 +751,7 @@ impl ShortcutAction for TranscribeAction {
                         Ok(Transcription {
                             text: transcription,
                             language,
+                            trace,
                         }) => {
                             debug!(
                                 "Transcription completed in {:?}: '{}'",
@@ -763,6 +766,7 @@ impl ShortcutAction for TranscribeAction {
                                     show_processing_overlay(&ah);
                                 }
                             }
+                            let llm_started = Instant::now();
                             let Some(processed) = complete_unless_cancelled(
                                 process_transcription_output(&ah, &transcription, post_process),
                                 || rm.was_cancelled_since(cancel_generation),
@@ -782,6 +786,24 @@ impl ShortcutAction for TranscribeAction {
                                 return;
                             }
 
+                            let dataset = personal::dataset::capture(
+                                &ah,
+                                &stop_ctx,
+                                personal::dataset::Processed {
+                                    audio_file: wav_saved.then(|| file_name.clone()),
+                                    sample_count,
+                                    trace: &trace,
+                                    rule_cleaned_text: &transcription,
+                                    llm_text: processed.post_processed_text.as_deref(),
+                                    llm_fallback_reason: None,
+                                    final_text: &processed.final_text,
+                                    language: language.as_ref(),
+                                    post_process_requested: post_process,
+                                    transcribe_elapsed,
+                                    llm_elapsed: post_process.then(|| llm_started.elapsed()),
+                                },
+                            );
+
                             // Save to history if WAV was saved
                             if wav_saved {
                                 if let Err(err) = hm.save_entry(
@@ -797,6 +819,9 @@ impl ShortcutAction for TranscribeAction {
                             }
 
                             if processed.final_text.is_empty() {
+                                if let Some(pending) = dataset {
+                                    pending.finish(&ah, "empty", None);
+                                }
                                 utils::hide_recording_overlay(&ah);
                                 set_tray_state(&ah, TrayIconState::Idle);
                                 emit_transcription_complete(
@@ -842,6 +867,14 @@ impl ShortcutAction for TranscribeAction {
                                                     TranscriptionOutcome::Failed
                                                 }
                                             };
+                                        if let Some(pending) = dataset {
+                                            let label = paste_guard::outcome_label(outcome);
+                                            pending.finish(
+                                                &ah_clone,
+                                                label,
+                                                Some(paste_time.elapsed()),
+                                            );
+                                        }
                                         // A new session may have started while
                                         // this paste ran; the UI is now its.
                                         if RECORDING_SESSION.load(Ordering::SeqCst) == session {

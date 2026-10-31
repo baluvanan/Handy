@@ -46,6 +46,7 @@ impl TranscriptionManager {
             return Ok(Some(Transcription {
                 text: String::new(),
                 language: None,
+                trace: Default::default(),
             }));
         }
 
@@ -133,6 +134,7 @@ impl TranscriptionManager {
         Ok(Some(Transcription {
             text: paragraphs.join("\n\n"),
             language: Some(language),
+            trace: Default::default(),
         }))
     }
 }

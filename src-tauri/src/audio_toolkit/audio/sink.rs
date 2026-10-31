@@ -76,6 +76,8 @@ pub struct CapturedAudio {
     pub input_silent: bool,
     /// The detector the recording borrowed, for the next one.
     pub vad: CaptureVad,
+    /// Where the kept (speech) audio fell in recording time.
+    pub timeline: crate::personal::timeline::SpeechTimeline,
 }
 
 /// One recording's consumer of 16 kHz mono audio from handy-recorder. Runs on
@@ -92,6 +94,7 @@ pub struct CaptureSink {
     ready: Option<mpsc::Sender<()>>,
     samples: Vec<f32>,
     heard_sound: bool,
+    timeline: crate::personal::timeline::SpeechTimeline,
 }
 
 /// Spectrum window at 16 kHz: 32 ms, near the overlay's ~30 Hz refresh.
@@ -128,6 +131,7 @@ impl CaptureSink {
             ready: Some(ready),
             samples: Vec::new(),
             heard_sound: false,
+            timeline: Default::default(),
         }
     }
 
@@ -160,6 +164,7 @@ impl CaptureSink {
             // `ready` is spent on the first chunk, so `None` means audio came.
             input_silent: self.ready.is_none() && !self.heard_sound,
             vad: self.vad,
+            timeline: self.timeline,
         }
     }
 
@@ -185,6 +190,7 @@ impl Sink for CaptureSink {
         }
 
         if self.policy == VadPolicy::Disabled {
+            self.timeline.record(real.len(), real.len());
             Self::emit(&mut self.samples, &self.on_audio, real);
             return;
         }
@@ -197,8 +203,11 @@ impl Sink for CaptureSink {
             .push_frame(chunk.samples)
             .unwrap_or(VadFrame::Speech(chunk.samples))
         {
-            VadFrame::Speech(frame) => Self::emit(&mut self.samples, &self.on_audio, frame),
-            VadFrame::Noise => {}
+            VadFrame::Speech(frame) => {
+                self.timeline.record(chunk.samples.len(), frame.len());
+                Self::emit(&mut self.samples, &self.on_audio, frame)
+            }
+            VadFrame::Noise => self.timeline.record(chunk.samples.len(), 0),
         }
     }
 }

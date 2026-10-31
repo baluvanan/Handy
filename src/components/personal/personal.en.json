@@ -18,6 +18,18 @@
     "blockSecureFields": {
       "title": "Never paste into password fields",
       "description": "When a secure text field has focus (or macOS Secure Input is on), skip the paste and show a notice instead. The transcript stays in History."
+    },
+    "datasetLogging": {
+      "title": "Log dictations for training & analysis",
+      "description": "Keep every dictation's raw model output, cleaned text, LLM text, timings, pauses and frontmost app in the local dataset, with its audio. Export with `handy --export-dataset <dir>`. Nothing leaves this Mac."
+    },
+    "verbatim": {
+      "title": "Verbatim transcription",
+      "description": "Prompt Whisper models with filler words so ums, uhs and false starts are kept in the raw transcript. Filler removal still cleans the pasted text. Whisper models only."
+    },
+    "verbatimPrompt": {
+      "title": "Verbatim prompt",
+      "description": "Initial prompt given to Whisper in verbatim mode. Leave empty for the default."
     }
   }
 }
