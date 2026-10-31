@@ -28,6 +28,7 @@ import { VadBackendSelector } from "../VadBackendSelector";
 import { PersonalPasteSettings } from "../../personal/PersonalPasteSettings";
 import { PersonalDatasetSettings } from "../../personal/PersonalDatasetSettings";
 import { PersonalProfilesSettings } from "../../personal/PersonalProfilesSettings";
+import { PersonalVerbatimSettings } from "../../personal/verbatim/PersonalVerbatimSettings";
 
 export const AdvancedSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -63,6 +64,8 @@ export const AdvancedSettings: React.FC = () => {
       </SettingsGroup>
 
       <PersonalProfilesSettings />
+
+      <PersonalVerbatimSettings />
 
       <SettingsGroup title={t("settings.advanced.groups.history")}>
         <HistoryLimit descriptionMode="tooltip" grouped={true} />
