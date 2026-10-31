@@ -15,7 +15,9 @@ concurrency:
 
 jobs:
   playwright:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the pinned Playwright
+    # (@playwright/test 1.58) can't install browsers for.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
