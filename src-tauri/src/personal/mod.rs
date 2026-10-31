@@ -5,21 +5,28 @@
 //! files. Each submodule documents the upstream call sites it relies on.
 
 pub mod analysis;
+pub mod busy;
 pub mod cli;
 pub mod dataset;
 pub mod focus;
+pub mod gap_estimate;
 pub mod insights;
 pub mod lmstudio;
+pub mod metric_snapshots;
 pub mod notice;
 pub mod paste_guard;
 pub mod pasteboard;
 #[cfg(target_os = "macos")]
 pub mod pasteboard_macos;
 pub mod profiles;
+pub mod retention;
 mod schema_fixture;
 pub mod settings;
 pub mod timeline;
 pub mod verbatim;
+pub mod verbatim_service;
+pub mod verbatim_store;
+pub mod worker;
 
 /// This fork never self-updates: an upstream release must never overwrite it,
 /// and builds carry no updater signing key. Forces update checks off exactly

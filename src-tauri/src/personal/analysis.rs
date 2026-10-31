@@ -1,9 +1,17 @@
 //! Speech analysis over the dictation log.
 //!
-//! Every metric is computed from the **raw** ASR text (before filler removal)
-//! and the VAD speech segments, then aggregated per day and per ISO week.
-//! Raw text keeps more disfluencies with verbatim mode on; without it,
-//! Whisper already drops many fillers, so filler counts are a lower bound.
+//! Every metric is computed from the **verbatim** transcript when the
+//! background worker has made one (CrisperWhisper keeps fillers, false starts
+//! and repetitions), otherwise from the **raw** ASR text (before filler
+//! removal), plus the VAD speech segments; then aggregated per day and per
+//! ISO week. The dictation model drops most fillers, so for dictations
+//! without a verbatim transcript a separate, clearly labelled *estimate* of
+//! the dropped fillers is added (`gap_estimate`).
+//!
+//! Every metric's definition is versioned ([`METRIC_VERSIONS`]); versions
+//! are stored with saved results (`metric_snapshots`) so a change in how a
+//! metric is calculated shows up as a marked discontinuity on the charts,
+//! never as a change in how you speak.
 //!
 //! Metrics (all heuristic, documented where they are computed):
 //! - words per minute of speech (and of recording time)
@@ -21,7 +29,86 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::dataset::DictationRecord;
+use super::gap_estimate::{self, Calibration};
 use super::timeline::Segment;
+use super::verbatim_store::VerbatimIndex;
+
+// ---------------------------------------------------------------------------
+// Metric definition versions
+// ---------------------------------------------------------------------------
+
+/// The definition version of every metric. **Bump a metric's number whenever
+/// its calculation changes** (word lists, tokenization, rate basis, the
+/// estimator...). Changelog:
+/// - all at 1: personal-v1 rules, verbatim-aware source selection, the
+///   duration-based filler estimate.
+pub const METRIC_VERSIONS: &[(&str, u32)] = &[
+    ("words_per_minute", 1),
+    ("fillers", 1),
+    ("filler_estimate", 1),
+    ("pauses", 1),
+    ("false_starts", 1),
+    ("repeated_words", 1),
+    ("hedges", 1),
+    ("vocabulary", 1),
+];
+
+pub fn metric_versions() -> BTreeMap<String, u32> {
+    METRIC_VERSIONS
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), *v))
+        .collect()
+}
+
+/// Which transcripts an aggregate was computed from.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct Basis {
+    /// Dictations measured from a verbatim transcript.
+    pub verbatim: u32,
+    /// Dictations measured from the dictation model's raw text only (their
+    /// fillers are partly estimated).
+    pub asr_only: u32,
+    /// Verbatim model revisions used (`model@revision`), sorted.
+    pub verbatim_sources: Vec<String>,
+}
+
+/// What the analysis can use besides the dictation log.
+#[derive(Debug, Clone, Default)]
+pub struct AnalysisContext {
+    pub verbatim: VerbatimIndex,
+    pub calibration: Calibration,
+}
+
+impl AnalysisContext {
+    /// Calibrates the filler estimate on dictations that have both a VAD
+    /// timeline and a verbatim transcript.
+    pub fn new(records: &[DictationRecord], verbatim: VerbatimIndex) -> Self {
+        let calibration = gap_estimate::calibrate(records.iter().filter_map(|r| {
+            let v = verbatim.get(r.id)?;
+            let c = analyze_text(&v.text);
+            let tokens = c.words + c.fillers.values().sum::<u32>();
+            Some((speech_ms(r), tokens))
+        }));
+        Self {
+            verbatim,
+            calibration,
+        }
+    }
+}
+
+fn speech_ms(r: &DictationRecord) -> u64 {
+    let segment_ms: u64 = r
+        .vad_segments
+        .iter()
+        .map(|s| s.end_ms.saturating_sub(s.start_ms))
+        .sum();
+    // Prefer the timeline; fall back to the kept-audio length.
+    if segment_ms > 0 {
+        segment_ms
+    } else {
+        r.speech_audio_ms.unwrap_or(0)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Vocabulary lists
@@ -301,6 +388,12 @@ pub struct Aggregate {
     pub unique_words: u32,
     pub type_token_ratio: f64,
     pub mattr: f64,
+    /// Fillers the dictation model probably dropped, **estimated** for
+    /// dictations without a verbatim transcript. Never mixed into `fillers`.
+    pub estimated_fillers: CountRate,
+    /// `fillers` plus `estimated_fillers` (the chart's dashed line).
+    pub fillers_with_estimate: CountRate,
+    pub basis: Basis,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -310,6 +403,26 @@ pub struct PeriodAggregate {
     /// First day of the period, `YYYY-MM-DD`.
     pub start_date: String,
     pub metrics: Aggregate,
+    /// Definition version of each metric these numbers were computed with.
+    pub metric_versions: BTreeMap<String, u32>,
+    /// Kept from an earlier computation because its input has not changed
+    /// (its definitions may be older than the current ones).
+    pub frozen: bool,
+    /// Hash of exactly which transcripts this was computed from.
+    pub input_hash: String,
+}
+
+/// A point where consecutive periods are not directly comparable.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct Discontinuity {
+    /// The first period after the change.
+    pub period: String,
+    /// Affected metric keys ([`METRIC_VERSIONS`]); empty means all.
+    pub metrics: Vec<String>,
+    /// `definitions` (a calculation changed) or `source` (the verbatim model
+    /// changed, or verbatim transcripts started).
+    pub kind: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -321,6 +434,12 @@ pub struct InsightsReport {
     pub totals: Aggregate,
     pub days: Vec<PeriodAggregate>,
     pub weeks: Vec<PeriodAggregate>,
+    pub day_discontinuities: Vec<Discontinuity>,
+    pub week_discontinuities: Vec<Discontinuity>,
+    /// The current definition versions.
+    pub metric_versions: BTreeMap<String, u32>,
+    /// Dictations the filler estimate was calibrated on (0 = defaults).
+    pub calibration_samples: u32,
 }
 
 fn round2(v: f64) -> f64 {
@@ -373,9 +492,23 @@ fn pause_stats(mut gaps: Vec<u64>, minutes: f64) -> PauseStats {
 }
 
 /// Aggregates a set of records (order irrelevant).
+/// Aggregates from raw ASR text only (no verbatim data).
+#[cfg(test)]
 pub fn aggregate<'a>(records: impl IntoIterator<Item = &'a DictationRecord>) -> Aggregate {
+    aggregate_with(records, &AnalysisContext::default())
+}
+
+/// Aggregates a set of records (order irrelevant), preferring verbatim
+/// transcripts.
+pub fn aggregate_with<'a>(
+    records: impl IntoIterator<Item = &'a DictationRecord>,
+    ctx: &AnalysisContext,
+) -> Aggregate {
+    let mut basis = Basis::default();
+    let mut sources: std::collections::BTreeSet<String> = Default::default();
+    let mut estimated = 0.0f64;
     let mut dictations = 0u32;
-    let mut speech_ms = 0u64;
+    let mut speech_ms_total = 0u64;
     let mut recording_ms = 0u64;
     let mut fillers: BTreeMap<String, u32> = BTreeMap::new();
     let mut hedges: BTreeMap<String, u32> = BTreeMap::new();
@@ -385,22 +518,14 @@ pub fn aggregate<'a>(records: impl IntoIterator<Item = &'a DictationRecord>) -> 
     let mut gaps: Vec<u64> = Vec::new();
 
     for r in records {
-        if r.raw_asr_text.trim().is_empty() {
+        let verbatim = ctx.verbatim.get(r.id).filter(|v| !v.text.trim().is_empty());
+        let text = verbatim.map_or(r.raw_asr_text.as_str(), |v| v.text.as_str());
+        if text.trim().is_empty() {
             continue;
         }
         dictations += 1;
-        let segment_ms: u64 = r
-            .vad_segments
-            .iter()
-            .map(|s| s.end_ms.saturating_sub(s.start_ms))
-            .sum();
-        // Prefer the timeline; fall back to the kept-audio length.
-        let this_speech = if segment_ms > 0 {
-            segment_ms
-        } else {
-            r.speech_audio_ms.unwrap_or(0)
-        };
-        speech_ms += this_speech;
+        let this_speech = speech_ms(r);
+        speech_ms_total += this_speech;
         recording_ms += r
             .latency
             .recording_ms
@@ -408,7 +533,18 @@ pub fn aggregate<'a>(records: impl IntoIterator<Item = &'a DictationRecord>) -> 
             .max(this_speech);
         gaps.extend(pauses(&r.vad_segments));
 
-        let c = analyze_text(&r.raw_asr_text);
+        let c = analyze_text(text);
+        match verbatim {
+            Some(v) => {
+                basis.verbatim += 1;
+                sources.insert(v.source_key());
+            }
+            None => {
+                basis.asr_only += 1;
+                let produced = c.words + c.fillers.values().sum::<u32>();
+                estimated += gap_estimate::from_duration(this_speech, produced, &ctx.calibration);
+            }
+        }
         for (k, v) in c.fillers {
             *fillers.entry(k).or_default() += v;
         }
@@ -420,7 +556,10 @@ pub fn aggregate<'a>(records: impl IntoIterator<Item = &'a DictationRecord>) -> 
         vocabulary.extend(c.vocabulary);
     }
 
+    let speech_ms = speech_ms_total;
     let speech_min = speech_ms as f64 / 60_000.0;
+    basis.verbatim_sources = sources.into_iter().collect();
+    let estimated = estimated.round() as u32;
     let recording_min = recording_ms as f64 / 60_000.0;
     let words = vocabulary.len() as u32;
     let filler_total: u32 = fillers.values().sum();
@@ -450,6 +589,9 @@ pub fn aggregate<'a>(records: impl IntoIterator<Item = &'a DictationRecord>) -> 
         unique_words: unique.len() as u32,
         type_token_ratio: round2(type_token_ratio(&vocabulary)),
         mattr: round2(mattr(&vocabulary)),
+        estimated_fillers: rate(estimated, speech_min),
+        fillers_with_estimate: rate(filler_total + estimated, speech_min),
+        basis,
     }
 }
 
@@ -462,7 +604,54 @@ fn local_date(ts: i64) -> NaiveDate {
 }
 
 /// Builds the full report: totals, per-day and per-ISO-week aggregates.
+#[cfg(test)]
 pub fn report(records: &[DictationRecord], since: Option<i64>) -> InsightsReport {
+    report_with(records, since, &AnalysisContext::default())
+}
+
+/// Identifies exactly what a period was computed from (which dictations,
+/// and for each, which transcript), so a stored result is reused only while
+/// its input is unchanged.
+fn input_hash(records: &[&DictationRecord], ctx: &AnalysisContext) -> String {
+    use sha2::{Digest, Sha256};
+    let mut keys: Vec<String> = records
+        .iter()
+        .map(|r| match ctx.verbatim.get(r.id) {
+            Some(v) => format!("{}:{}:{}", r.id, v.source_key(), v.processed_at),
+            None => format!("{}:asr:{}", r.id, r.raw_asr_text.len()),
+        })
+        .collect();
+    keys.sort_unstable();
+    let mut h = Sha256::new();
+    for k in keys {
+        h.update(k.as_bytes());
+        h.update(b"\n");
+    }
+    format!("{:x}", h.finalize())
+}
+
+fn period(
+    label: String,
+    start: NaiveDate,
+    rs: &[&DictationRecord],
+    ctx: &AnalysisContext,
+) -> PeriodAggregate {
+    PeriodAggregate {
+        period: label,
+        start_date: start.format("%Y-%m-%d").to_string(),
+        metrics: aggregate_with(rs.iter().copied(), ctx),
+        metric_versions: metric_versions(),
+        frozen: false,
+        input_hash: input_hash(rs, ctx),
+    }
+}
+
+/// Builds the full report: totals, per-day and per-ISO-week aggregates.
+pub fn report_with(
+    records: &[DictationRecord],
+    since: Option<i64>,
+    ctx: &AnalysisContext,
+) -> InsightsReport {
     let mut by_day: BTreeMap<NaiveDate, Vec<&DictationRecord>> = BTreeMap::new();
     let mut by_week: BTreeMap<(i32, u32), Vec<&DictationRecord>> = BTreeMap::new();
     for r in records {
@@ -474,31 +663,90 @@ pub fn report(records: &[DictationRecord], since: Option<i64>) -> InsightsReport
             .or_default()
             .push(r);
     }
+    let days: Vec<PeriodAggregate> = by_day
+        .into_iter()
+        .map(|(date, rs)| period(date.format("%Y-%m-%d").to_string(), date, &rs, ctx))
+        .collect();
+    let weeks: Vec<PeriodAggregate> = by_week
+        .into_iter()
+        .map(|((year, week), rs)| {
+            let start =
+                NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon).unwrap_or_default();
+            period(format!("{year}-W{week:02}"), start, &rs, ctx)
+        })
+        .collect();
     InsightsReport {
         generated_at: chrono::Utc::now().timestamp(),
         since,
-        totals: aggregate(records),
-        days: by_day
-            .into_iter()
-            .map(|(date, rs)| PeriodAggregate {
-                period: date.format("%Y-%m-%d").to_string(),
-                start_date: date.format("%Y-%m-%d").to_string(),
-                metrics: aggregate(rs),
-            })
-            .collect(),
-        weeks: by_week
-            .into_iter()
-            .map(|((year, week), rs)| {
-                let start = NaiveDate::from_isoywd_opt(year, week, chrono::Weekday::Mon)
-                    .unwrap_or_default();
-                PeriodAggregate {
-                    period: format!("{year}-W{week:02}"),
-                    start_date: start.format("%Y-%m-%d").to_string(),
-                    metrics: aggregate(rs),
-                }
-            })
-            .collect(),
+        totals: aggregate_with(records, ctx),
+        day_discontinuities: discontinuities(&days),
+        week_discontinuities: discontinuities(&weeks),
+        days,
+        weeks,
+        metric_versions: metric_versions(),
+        calibration_samples: ctx.calibration.samples,
     }
+}
+
+/// Where consecutive periods (with data) are not directly comparable: a
+/// metric's definition version differs, or the verbatim source changed.
+pub fn discontinuities(periods: &[PeriodAggregate]) -> Vec<Discontinuity> {
+    let mut out = Vec::new();
+    let with_data: Vec<&PeriodAggregate> = periods
+        .iter()
+        .filter(|p| p.metrics.dictations > 0)
+        .collect();
+    for pair in with_data.windows(2) {
+        let (prev, cur) = (pair[0], pair[1]);
+        let changed: Vec<String> = cur
+            .metric_versions
+            .iter()
+            .filter(|(k, v)| prev.metric_versions.get(*k) != Some(*v))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if !changed.is_empty() {
+            let detail = changed
+                .iter()
+                .map(|k| {
+                    format!(
+                        "{k} v{} → v{}",
+                        prev.metric_versions.get(k).copied().unwrap_or(0),
+                        cur.metric_versions[k]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(Discontinuity {
+                period: cur.period.clone(),
+                metrics: changed,
+                kind: "definitions".into(),
+                detail,
+            });
+        }
+        let (a, b) = (&prev.metrics.basis, &cur.metrics.basis);
+        if a.verbatim == 0 && b.verbatim > 0 {
+            out.push(Discontinuity {
+                period: cur.period.clone(),
+                metrics: Vec::new(),
+                kind: "source".into(),
+                detail: "verbatim transcripts start".into(),
+            });
+        } else if a.verbatim > 0
+            && b.verbatim > 0
+            && !b
+                .verbatim_sources
+                .iter()
+                .all(|s| a.verbatim_sources.contains(s))
+        {
+            out.push(Discontinuity {
+                period: cur.period.clone(),
+                metrics: Vec::new(),
+                kind: "source".into(),
+                detail: format!("verbatim model changed: {}", b.verbatim_sources.join(", ")),
+            });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -697,5 +945,120 @@ mod tests {
         assert_eq!(rep.weeks[0].start_date, "2026-10-26");
         assert_eq!(rep.weeks[0].metrics.dictations, 3);
         assert_eq!(rep.weeks[0].metrics.fillers.count, 2);
+    }
+
+    fn verbatim_index(rows: &[(i64, &str, &str)]) -> VerbatimIndex {
+        use crate::personal::verbatim_store::VerbatimTranscript;
+        let mut index = VerbatimIndex::default();
+        for (id, text, rev) in rows {
+            index.by_entry.insert(
+                *id,
+                VerbatimTranscript {
+                    entry_id: *id,
+                    text: (*text).into(),
+                    words: Vec::new(),
+                    model_id: "nyrahealth/CrisperWhisper".into(),
+                    model_revision: Some((*rev).into()),
+                    processed_at: 1,
+                    verified: true,
+                    audio_duration_s: 10.0,
+                },
+            );
+        }
+        index
+    }
+
+    fn with_id(mut r: DictationRecord, id: i64) -> DictationRecord {
+        r.id = id;
+        r
+    }
+
+    #[test]
+    fn verbatim_transcripts_replace_raw_text_and_estimates_stay_separate() {
+        let records = vec![
+            with_id(record(0, "so I think we ship", &[(0, 10_000)]), 1),
+            with_id(record(60, "we ship it", &[(0, 10_000)]), 2),
+        ];
+        let ctx = AnalysisContext {
+            verbatim: verbatim_index(&[(1, "[UM] so I- I think, uh, we we ship", "r1")]),
+            calibration: Calibration {
+                ms_per_token: 400.0,
+                samples: 5,
+            },
+        };
+        let a = aggregate_with(&records, &ctx);
+        assert_eq!(a.basis.verbatim, 1);
+        assert_eq!(a.basis.asr_only, 1);
+        assert_eq!(
+            a.basis.verbatim_sources,
+            vec!["nyrahealth/CrisperWhisper@r1".to_string()]
+        );
+        // Measured fillers come only from the verbatim transcript.
+        assert_eq!(a.fillers.count, 2);
+        assert_eq!(a.false_starts.count, 1);
+        assert_eq!(a.repeated_words.count, 1);
+        // Record 2: 10 s ≈ 25 tokens expected, 3 produced → capped estimate.
+        assert_eq!(a.estimated_fillers.count, 8);
+        assert_eq!(a.fillers_with_estimate.count, 10);
+
+        // Without verbatim data nothing is attributed to verbatim.
+        let plain = aggregate(&records);
+        assert_eq!(plain.basis.verbatim, 0);
+        assert_eq!(plain.fillers.count, 0);
+    }
+
+    #[test]
+    fn calibration_comes_from_verbatim_dictations() {
+        let records: Vec<DictationRecord> = (1..=3)
+            .map(|i| with_id(record(i * 10, "x", &[(0, 4_000)]), i))
+            .collect();
+        let ten = "a b c d e f g h i j";
+        let index = verbatim_index(&[(1, ten, "r"), (2, ten, "r"), (3, ten, "r")]);
+        let ctx = AnalysisContext::new(&records, index);
+        assert_eq!(ctx.calibration.samples, 3);
+        assert!((ctx.calibration.ms_per_token - 400.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn report_marks_where_verbatim_transcripts_start_and_models_change() {
+        let day = 86_400;
+        let t0 = 1_700_000_000;
+        let records: Vec<DictationRecord> = (0..3)
+            .map(|d| with_id(record(t0 + d * day, "hello there", &[(0, 2000)]), d + 1))
+            .collect();
+        let ctx = AnalysisContext {
+            verbatim: verbatim_index(&[(2, "um hello there", "r1"), (3, "uh hello there", "r2")]),
+            calibration: Calibration::default(),
+        };
+        let rep = report_with(&records, None, &ctx);
+        assert_eq!(rep.days.len(), 3);
+        let kinds: Vec<(&str, &str)> = rep
+            .day_discontinuities
+            .iter()
+            .map(|d| (d.period.as_str(), d.detail.as_str()))
+            .collect();
+        assert_eq!(kinds.len(), 2, "{kinds:?}");
+        assert_eq!(kinds[0].0, rep.days[1].period);
+        assert!(kinds[0].1.contains("start"));
+        assert!(kinds[1].1.contains("model changed"));
+        assert_eq!(rep.metric_versions, metric_versions());
+        assert!(rep.days.iter().all(|d| d.input_hash.len() == 64));
+    }
+
+    #[test]
+    fn every_metric_has_a_version() {
+        let v = metric_versions();
+        for key in [
+            "words_per_minute",
+            "fillers",
+            "filler_estimate",
+            "pauses",
+            "false_starts",
+            "repeated_words",
+            "hedges",
+            "vocabulary",
+        ] {
+            assert!(v.get(key).is_some_and(|n| *n >= 1), "{key}");
+        }
     }
 }

@@ -29,6 +29,10 @@ pub struct PersonalSettings {
     pub llm_timeout_ms: u64,
     /// Per-app behaviour keyed on the frontmost app's bundle id.
     pub app_profiles: Vec<super::profiles::AppProfile>,
+    /// The background verbatim-analysis service (worker, schedule,
+    /// retention, coaching note). Updated through its own command so the
+    /// launchd agent stays in sync.
+    pub verbatim_service: super::verbatim_service::VerbatimServiceSettings,
 }
 
 impl Default for PersonalSettings {
@@ -40,6 +44,7 @@ impl Default for PersonalSettings {
             verbatim_prompt: super::verbatim::DEFAULT_VERBATIM_PROMPT.to_string(),
             llm_timeout_ms: super::lmstudio::DEFAULT_LLM_TIMEOUT_MS,
             app_profiles: super::profiles::default_profiles(),
+            verbatim_service: Default::default(),
         }
     }
 }
@@ -52,7 +57,11 @@ pub fn update_personal_settings(
     personal: PersonalSettings,
 ) -> Result<PersonalSettings, String> {
     let mut settings = get_settings(&app);
+    // The service block has its own command (it also manages launchd);
+    // never let a stale copy from this one overwrite it.
+    let service = settings.personal.verbatim_service.clone();
     settings.personal = personal;
+    settings.personal.verbatim_service = service;
     let stored = settings.personal.clone();
     write_settings(&app, settings);
     Ok(stored)

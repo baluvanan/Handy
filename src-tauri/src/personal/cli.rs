@@ -89,14 +89,17 @@ pub fn run(app: &AppHandle, args: &PersonalCliArgs) -> i32 {
     };
 
     if args.analyze {
-        let records = match store.records(since) {
-            Ok(records) => records,
+        // Verbatim-aware, with stored metric versions (same as Insights).
+        let report = match crate::portable::app_data_dir(app)
+            .map_err(|e| e.to_string())
+            .and_then(|dir| super::insights::build_report(&dir, since))
+        {
+            Ok(report) => report,
             Err(e) => {
-                eprintln!("error: cannot read the dataset: {e:#}");
+                eprintln!("error: cannot build the report: {e}");
                 return 1;
             }
         };
-        let report = super::analysis::report(&records, since);
         match serde_json::to_string_pretty(&report) {
             Ok(json) => println!("{json}"),
             Err(e) => {

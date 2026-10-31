@@ -213,12 +213,96 @@ async getSpeechInsights(sinceDays: number | null) : Promise<Result<InsightsRepor
 }
 },
 /**
- * Asks the configured post-processing LLM for a short coaching note based
- * on the last two weeks of aggregate metrics.
+ * Asks the coaching LLM (local LM Studio by default) for a short coaching
+ * note based on the last two weeks of aggregate metrics.
  */
 async generateCoachingNote() : Promise<Result<string, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("generate_coaching_note") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Recomputes every stored period with the current metric definitions
+ * (removes "definitions changed" markers).
+ */
+async recomputeSpeechMetrics() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recompute_speech_metrics") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getVerbatimServiceStatus(refresh: boolean) : Promise<Result<VerbatimServiceStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_verbatim_service_status", { refresh }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateVerbatimServiceSettings(settings: VerbatimServiceSettings) : Promise<Result<VerbatimServiceSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_verbatim_service_settings", { settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async verbatimRunNow() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verbatim_run_now") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async verbatimRetry(entryId: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verbatim_retry", { entryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async verbatimFix() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verbatim_fix") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async verbatimDoctor() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verbatim_doctor") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async verbatimRevealLogs() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("verbatim_reveal_logs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async retentionPreview(settings: RetentionSettings) : Promise<Result<RetentionPreview, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("retention_preview", { settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getCoachingNotes() : Promise<Result<CoachingNote[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_coaching_notes") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1087,7 +1171,8 @@ recordingStateEvent: RecordingStateEvent,
 streamPhaseEvent: StreamPhaseEvent,
 streamTextEvent: StreamTextEvent,
 transcriptionCompleteEvent: TranscriptionCompleteEvent,
-transcriptionJob: TranscriptionJob
+transcriptionJob: TranscriptionJob,
+verbatimServiceChanged: VerbatimServiceChanged
 }>({
 historyUpdatePayload: "history-update-payload",
 personalNotice: "personal-notice",
@@ -1095,7 +1180,8 @@ recordingStateEvent: "recording-state-event",
 streamPhaseEvent: "stream-phase-event",
 streamTextEvent: "stream-text-event",
 transcriptionCompleteEvent: "transcription-complete-event",
-transcriptionJob: "transcription-job"
+transcriptionJob: "transcription-job",
+verbatimServiceChanged: "verbatim-service-changed"
 })
 
 /** user-defined constants **/
@@ -1123,7 +1209,16 @@ words_per_minute: number;
 /**
  * Words per minute of recording (including pauses).
  */
-words_per_minute_overall: number; fillers: CountRate; fillers_by_word: Partial<{ [key in string]: CountRate }>; pauses: PauseStats; false_starts: CountRate; repeated_words: CountRate; hedges: CountRate; hedges_by_phrase: Partial<{ [key in string]: CountRate }>; unique_words: number; type_token_ratio: number; mattr: number }
+words_per_minute_overall: number; fillers: CountRate; fillers_by_word: Partial<{ [key in string]: CountRate }>; pauses: PauseStats; false_starts: CountRate; repeated_words: CountRate; hedges: CountRate; hedges_by_phrase: Partial<{ [key in string]: CountRate }>; unique_words: number; type_token_ratio: number; mattr: number; 
+/**
+ * Fillers the dictation model probably dropped, **estimated** for
+ * dictations without a verbatim transcript. Never mixed into `fillers`.
+ */
+estimated_fillers: CountRate; 
+/**
+ * `fillers` plus `estimated_fillers` (the chart's dashed line).
+ */
+fillers_with_estimate: CountRate; basis: Basis }
 export type AppProfile = { 
 /**
  * Display name.
@@ -1247,6 +1342,23 @@ export type AutoUnavailableReason =
  */
 { kind: "no_match" }
 export type AvailableAccelerators = { transcribe: string[]; gpu_devices: GpuDeviceOption[] }
+/**
+ * Which transcripts an aggregate was computed from.
+ */
+export type Basis = { 
+/**
+ * Dictations measured from a verbatim transcript.
+ */
+verbatim: number; 
+/**
+ * Dictations measured from the dictation model's raw text only (their
+ * fillers are partly estimated).
+ */
+asr_only: number; 
+/**
+ * Verbatim model revisions used (`model@revision`), sorted.
+ */
+verbatim_sources: string[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
 /**
  * Script applied to Mandarin and Cantonese output. Traditional carries its region
@@ -1266,8 +1378,30 @@ export type ChineseScript =
  */
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
+export type CoachingNote = { 
+/**
+ * ISO week the note is about (`YYYY-Www`).
+ */
+week: string; created_at: number; text: string }
 export type CountRate = { count: number; per_minute: number }
 export type CustomSounds = { start: boolean; stop: boolean }
+/**
+ * A point where consecutive periods are not directly comparable.
+ */
+export type Discontinuity = { 
+/**
+ * The first period after the change.
+ */
+period: string; 
+/**
+ * Affected metric keys ([`METRIC_VERSIONS`]); empty means all.
+ */
+metrics: string[]; 
+/**
+ * `definitions` (a calculation changed) or `source` (the verbatim model
+ * changed, or verbatim transcripts started).
+ */
+kind: string; detail: string }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; 
 /**
@@ -1300,7 +1434,15 @@ generated_at: number;
 /**
  * Unix seconds; `None` for all time.
  */
-since: number | null; totals: Aggregate; days: PeriodAggregate[]; weeks: PeriodAggregate[] }
+since: number | null; totals: Aggregate; days: PeriodAggregate[]; weeks: PeriodAggregate[]; day_discontinuities: Discontinuity[]; week_discontinuities: Discontinuity[]; 
+/**
+ * The current definition versions.
+ */
+metric_versions: Partial<{ [key in string]: number }>; 
+/**
+ * Dictations the filler estimate was calibrated on (0 = defaults).
+ */
+calibration_samples: number }
 export type KeyboardDiagnosticReport = { secure_input_enabled: boolean; culprit_pid: number | null; culprit_name: string | null; 
 /**
  * Counts only — key identity is deliberately never captured.
@@ -1417,7 +1559,20 @@ period: string;
 /**
  * First day of the period, `YYYY-MM-DD`.
  */
-start_date: string; metrics: Aggregate }
+start_date: string; metrics: Aggregate; 
+/**
+ * Definition version of each metric these numbers were computed with.
+ */
+metric_versions: Partial<{ [key in string]: number }>; 
+/**
+ * Kept from an earlier computation because its input has not changed
+ * (its definitions may be older than the current ones).
+ */
+frozen: boolean; 
+/**
+ * Hash of exactly which transcripts this was computed from.
+ */
+input_hash: string }
 export type PermissionAccess = "allowed" | "denied" | "unknown"
 export type PersonalNotice = { kind: PersonalNoticeKind; 
 /**
@@ -1433,7 +1588,12 @@ export type PersonalNoticeKind =
  * The cleanup LLM was unreachable or too slow; rule-cleaned text was
  * pasted instead.
  */
-"llm_fallback"
+"llm_fallback" | 
+/**
+ * The verbatim-analysis service needs attention (worker missing,
+ * broken, not set up).
+ */
+"verbatim_service_attention"
 /**
  * Container-level `serde(default)`: any field missing from a stored settings
  * object falls back to its default, so adding fields never breaks a load.
@@ -1467,7 +1627,13 @@ llm_timeout_ms: number;
 /**
  * Per-app behaviour keyed on the frontmost app's bundle id.
  */
-app_profiles: AppProfile[] }
+app_profiles: AppProfile[]; 
+/**
+ * The background verbatim-analysis service (worker, schedule,
+ * retention, coaching note). Updated through its own command so the
+ * launchd agent stays in sync.
+ */
+verbatim_service: VerbatimServiceSettings }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.
@@ -1522,6 +1688,34 @@ export type RecordingPhase =
 "cancelled"
 export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
 export type RecordingStateEvent = { phase: RecordingPhase }
+export type RetentionItem = { entry_id: number; created_at: number; file: string; bytes: number }
+export type RetentionPreview = { compress: RetentionItem[]; delete: RetentionItem[]; 
+/**
+ * Old enough to delete, but kept: no verbatim transcript yet.
+ */
+kept_unprocessed: number; 
+/**
+ * Old enough to delete, but kept: the transcript did not verify.
+ */
+kept_unverified: number; 
+/**
+ * Old enough to delete, but kept: History still shows the recording.
+ */
+kept_in_history: number; bytes_to_compress: number; 
+/**
+ * Rough: FLAC typically halves speech WAVs.
+ */
+estimated_bytes_saved: number; bytes_to_delete: number }
+export type RetentionSettings = { enabled: boolean; 
+/**
+ * Compress WAVs older than this (lossless FLAC). 0 = never.
+ */
+compress_after_days: number; 
+/**
+ * Delete audio older than this, only with a verified verbatim
+ * transcript. 0 = never.
+ */
+delete_after_days: number }
 /**
  * A retired ONNX model found on disk.
  */
@@ -1660,7 +1854,98 @@ export type TranscriptionOutcome =
 "failed"
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"
 export type VadBackend = "silero" | "earshot"
+/**
+ * Emitted whenever the service status may have changed (the UI refetches).
+ */
+export type VerbatimServiceChanged = { reason: string }
+export type VerbatimServiceSettings = { 
+/**
+ * Installs the launchd agent (nightly + at login) and enables triggers.
+ */
+enabled: boolean; schedule_hour: number; schedule_minute: number; 
+/**
+ * Run when the Mac has been idle this long and there is work queued.
+ */
+idle_trigger_enabled: boolean; idle_minutes: number; skip_on_battery: boolean; 
+/**
+ * Nightly runs stop by this time and continue on the next run.
+ */
+time_budget_enabled: boolean; stop_by_hour: number; stop_by_minute: number; 
+/**
+ * Re-sync the worker's environment automatically when it's out of date.
+ */
+auto_update: boolean; 
+/**
+ * Empty: the fork's own `analysis-worker/`.
+ */
+worker_dir: string; 
+/**
+ * Empty: search the usual locations.
+ */
+uv_path: string; retention: RetentionSettings; 
+/**
+ * Generate the weekly coaching note on Mondays.
+ */
+coaching_weekly: boolean; 
+/**
+ * LLM provider for the coaching note (aggregated metrics only).
+ */
+coaching_provider_id: string }
+export type VerbatimServiceStatus = { platform_supported: boolean; enabled: boolean; health: WorkerHealth; status: WorkerStatus | null; error: string | null; worker_dir: string; uv_path: string | null; log_dir: string; bundled_worker_version: string | null; 
+/**
+ * A run Handy started is in progress.
+ */
+run_in_progress: boolean; 
+/**
+ * install / uninstall / sync / model download in progress.
+ */
+operation: string | null; last_operation_error: string | null; 
+/**
+ * Seconds since last keyboard/mouse input (macOS), for the idle trigger.
+ */
+user_idle_seconds: number | null }
 export type WindowsMicrophonePermissionStatus = { supported: boolean; overall_access: PermissionAccess; device_access: PermissionAccess; app_access: PermissionAccess; desktop_app_access: PermissionAccess }
+export type WorkerDisk = { worker_bytes: number; model_bytes: number; results_db_bytes: number; free_bytes: number | null }
+export type WorkerFailure = { entry_id: number; created_at: number; status: string; attempts: number; last_error: string | null; skip_reason: string | null }
+/**
+ * What the settings/Insights UI shows, with a one-click fix where possible.
+ */
+export type WorkerHealth = 
+/**
+ * No `analysis-worker/` at the configured path.
+ */
+"missing" | 
+/**
+ * `uv` not found (needed to set up / update the environment).
+ */
+"no_uv" | 
+/**
+ * The environment was never created (`uv sync` not run).
+ */
+"not_synced" | 
+/**
+ * The checkout changed since the last sync, or Handy expects a
+ * different worker version/protocol. Fix: re-sync.
+ */
+"out_of_date" | 
+/**
+ * `status` failed to run or returned garbage.
+ */
+"broken" | 
+/**
+ * Running fine but something needs a decision (model not downloaded,
+ * unknown schema, repeated failures).
+ */
+"needs_attention" | "ok"
+export type WorkerLaunchd = { installed: boolean; loaded: boolean; last_exit: string | null; label: string }
+export type WorkerModel = { model_id: string; revision: string | null; state: string; bytes: number | null; license: string | null }
+export type WorkerQueue = { pending: number | null; dictations_with_audio: number | null; done: number; failed: number; skipped: number }
+export type WorkerRun = { id: number; trigger: string; started_at: number; finished_at: number | null; outcome: string | null; message: string | null; processed: number; failed: number; skipped: number; yields: number; queue_after: number | null; audio_s: number; processing_s: number }
+export type WorkerRunning = { pid: number | null; started_at: number | null; trigger: string | null }
+export type WorkerSchema = { ok: boolean; error: string | null }
+export type WorkerStatus = { ok: boolean; attention: string[]; versions: WorkerVersions; paths: WorkerStatusPaths; running: WorkerRunning | null; queue: WorkerQueue; schema: WorkerSchema; last_run: WorkerRun | null; recent_runs: WorkerRun[]; failures: WorkerFailure[]; model: WorkerModel; disk: WorkerDisk; launchd: WorkerLaunchd }
+export type WorkerStatusPaths = { log_dir: string; log_file: string; results_db: string }
+export type WorkerVersions = { worker_version: string; source_version: string | null; protocol: number; up_to_date: boolean; problems: string[]; python_version: string | null }
 
 /** tauri-specta globals **/
 
