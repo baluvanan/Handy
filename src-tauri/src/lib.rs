@@ -682,6 +682,8 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_paste_delay_after_ms_setting,
             shortcut::change_reliable_paste_setting,
             personal::settings::update_personal_settings,
+            personal::insights::get_speech_insights,
+            personal::insights::generate_coaching_note,
             shortcut::change_paste_method_setting,
             shortcut::get_available_typing_tools,
             shortcut::change_typing_tool_setting,

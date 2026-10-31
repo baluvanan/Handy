@@ -1,6 +1,7 @@
 //! Fork-only CLI flags, flattened into upstream's `CliArgs`:
 //!
 //! - `--export-dataset <DIR> [--since <DATE>]` writes `DIR/dataset.jsonl`.
+//! - `--analyze [--since <DATE>]` prints the speech-analysis JSON report.
 //!
 //! These run headlessly (no window, tray or microphone) like
 //! `--transcribe-file`, print to stdout and exit.
@@ -20,6 +21,11 @@ pub struct PersonalCliArgs {
     #[arg(long, value_name = "DIR")]
     pub export_dataset: Option<PathBuf>,
 
+    /// Print speech metrics (WPM, fillers, pauses, false starts, repeats,
+    /// hedges, vocabulary variety) per day and ISO week as JSON and exit.
+    #[arg(long)]
+    pub analyze: bool,
+
     /// Only include dictations on or after this date: YYYY-MM-DD (local
     /// time) or a relative span such as 7d / 4w.
     #[arg(long, value_name = "DATE")]
@@ -29,7 +35,7 @@ pub struct PersonalCliArgs {
 impl PersonalCliArgs {
     /// True when one of these flags asks for a headless one-shot run.
     pub fn is_headless(&self) -> bool {
-        self.export_dataset.is_some()
+        self.export_dataset.is_some() || self.analyze
     }
 }
 
@@ -81,6 +87,24 @@ pub fn run(app: &AppHandle, args: &PersonalCliArgs) -> i32 {
             return 1;
         }
     };
+
+    if args.analyze {
+        let records = match store.records(since) {
+            Ok(records) => records,
+            Err(e) => {
+                eprintln!("error: cannot read the dataset: {e:#}");
+                return 1;
+            }
+        };
+        let report = super::analysis::report(&records, since);
+        match serde_json::to_string_pretty(&report) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        }
+    }
 
     if let Some(dir) = &args.export_dataset {
         match export_jsonl(&store, dir, since) {

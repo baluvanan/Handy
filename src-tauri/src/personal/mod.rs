@@ -4,9 +4,11 @@
 //! it) so upstream merges only ever touch a handful of hook lines in existing
 //! files. Each submodule documents the upstream call sites it relies on.
 
+pub mod analysis;
 pub mod cli;
 pub mod dataset;
 pub mod focus;
+pub mod insights;
 pub mod lmstudio;
 pub mod notice;
 pub mod paste_guard;

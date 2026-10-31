@@ -200,6 +200,30 @@ async updatePersonalSettings(personal: PersonalSettings) : Promise<Result<Person
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Speech metrics per day and week for the Insights page. `since_days`
+ * limits to the last N days (all time when `None`).
+ */
+async getSpeechInsights(sinceDays: number | null) : Promise<Result<InsightsReport, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_speech_insights", { sinceDays }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks the configured post-processing LLM for a short coaching note based
+ * on the last two weeks of aggregate metrics.
+ */
+async generateCoachingNote() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("generate_coaching_note") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changePasteMethodSetting(method: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_paste_method_setting", { method }) };
@@ -1026,10 +1050,8 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
 }
 },
 /**
- * Checks if the Mac is a laptop by detecting battery presence
- * 
- * This uses pmset to check for battery information.
- * Returns true if a battery is detected (laptop), false otherwise (desktop)
+ * Stub implementation for non-macOS platforms
+ * Always returns false since laptop detection is macOS-specific
  */
 async isLaptop() : Promise<Result<boolean, string>> {
     try {
@@ -1068,6 +1090,26 @@ transcriptionJob: "transcription-job"
 
 /** user-defined types **/
 
+/**
+ * Metrics for a set of dictations.
+ */
+export type Aggregate = { dictations: number; words: number; 
+/**
+ * Seconds of detected speech.
+ */
+speech_seconds: number; 
+/**
+ * Seconds of recording (speech + pauses).
+ */
+recording_seconds: number; 
+/**
+ * Words per minute of speech (articulation rate).
+ */
+words_per_minute: number; 
+/**
+ * Words per minute of recording (including pauses).
+ */
+words_per_minute_overall: number; fillers: CountRate; fillers_by_word: Partial<{ [key in string]: CountRate }>; pauses: PauseStats; false_starts: CountRate; repeated_words: CountRate; hedges: CountRate; hedges_by_phrase: Partial<{ [key in string]: CountRate }>; unique_words: number; type_token_ratio: number; mattr: number }
 /**
  * The container-level `serde(default)` (backed by the `Default` impl below)
  * guarantees every field — including ones added in the future — falls back to
@@ -1192,6 +1234,7 @@ export type ChineseScript =
  */
 "traditional_hk"
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
+export type CountRate = { count: number; per_minute: number }
 export type CustomSounds = { start: boolean; stop: boolean }
 export type GpuDeviceOption = { id: string; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; 
@@ -1217,6 +1260,15 @@ export type ImplementationChangeResult = { success: boolean;
  * List of binding IDs that were reset to defaults due to incompatibility
  */
 reset_bindings: string[] }
+export type InsightsReport = { 
+/**
+ * Unix seconds.
+ */
+generated_at: number; 
+/**
+ * Unix seconds; `None` for all time.
+ */
+since: number | null; totals: Aggregate; days: PeriodAggregate[]; weeks: PeriodAggregate[] }
 export type KeyboardDiagnosticReport = { secure_input_enabled: boolean; culprit_pid: number | null; culprit_name: string | null; 
 /**
  * Counts only — key identity is deliberately never captured.
@@ -1320,6 +1372,20 @@ export type OverlayPosition = "top" | "bottom"
 export type OverlayStyle = "none" | "minimal" | "live"
 export type PaginatedHistory = { entries: HistoryEntry[]; has_more: boolean }
 export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_shift_v" | "external_script"
+export type PauseStats = { count: number; mean_ms: number; median_ms: number; p90_ms: number; longest_ms: number; 
+/**
+ * Counts per bucket: <1 s, 1–2 s, 2–5 s, ≥5 s.
+ */
+buckets: number[]; per_minute: number }
+export type PeriodAggregate = { 
+/**
+ * `YYYY-MM-DD` (day) or `YYYY-Www` (ISO week).
+ */
+period: string; 
+/**
+ * First day of the period, `YYYY-MM-DD`.
+ */
+start_date: string; metrics: Aggregate }
 export type PermissionAccess = "allowed" | "denied" | "unknown"
 export type PersonalNotice = { kind: PersonalNoticeKind; 
 /**

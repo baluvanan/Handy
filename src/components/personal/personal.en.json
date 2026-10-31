@@ -36,5 +36,56 @@
       "description": "If the LLM (e.g. LM Studio) is unreachable or takes longer than this, the rule-cleaned text is pasted instead and a small notice is shown. Dictation never fails because the LLM is down.",
       "unit": "seconds"
     }
+  },
+  "insights": {
+    "sidebar": "Insights",
+    "title": "Speech insights",
+    "subtitle": "From your raw dictations (before cleanup). Computed locally.",
+    "empty": "No dictations in this range yet.",
+    "range": {
+      "days": "{{count}}d",
+      "all": "All"
+    },
+    "granularity": {
+      "day": "Daily",
+      "week": "Weekly"
+    },
+    "metrics": {
+      "wpm": "Speaking rate",
+      "fillers": "Fillers",
+      "medianPause": "Median pause",
+      "dictations": "Dictations",
+      "hedges": "Hedges",
+      "restarts": "False starts & repeats",
+      "pauses": "Median pause length",
+      "variety": "Vocabulary variety"
+    },
+    "units": {
+      "wpm": "wpm",
+      "perMin": "/ min",
+      "per100": "/ 100 words",
+      "seconds": "s",
+      "mattr": "MATTR",
+      "words": "{{count}} words"
+    },
+    "breakdown": {
+      "fillers": "Fillers by word",
+      "hedges": "Hedge phrases",
+      "pauses": "Pause lengths"
+    },
+    "coaching": {
+      "title": "Weekly coaching note",
+      "description": "Sends this week's and last week's aggregate numbers (never your transcripts) to your post-processing LLM.",
+      "button": "Get note",
+      "busy": "Thinking…"
+    },
+    "table": {
+      "show": "Show as table",
+      "hide": "Hide table",
+      "period": "Period",
+      "fillersPerMin": "Fillers/min",
+      "hedgesPer100": "Hedges/100w",
+      "medianPause": "Median pause (s)"
+    }
   }
 }
