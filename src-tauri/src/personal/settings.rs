@@ -27,6 +27,8 @@ pub struct PersonalSettings {
     /// Budget for LLM post-processing (health check + call). Past it, the
     /// rule-cleaned text is pasted instead.
     pub llm_timeout_ms: u64,
+    /// Per-app behaviour keyed on the frontmost app's bundle id.
+    pub app_profiles: Vec<super::profiles::AppProfile>,
 }
 
 impl Default for PersonalSettings {
@@ -37,6 +39,7 @@ impl Default for PersonalSettings {
             verbatim_mode: false,
             verbatim_prompt: super::verbatim::DEFAULT_VERBATIM_PROMPT.to_string(),
             llm_timeout_ms: super::lmstudio::DEFAULT_LLM_TIMEOUT_MS,
+            app_profiles: super::profiles::default_profiles(),
         }
     }
 }

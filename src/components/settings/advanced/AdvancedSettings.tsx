@@ -27,6 +27,7 @@ import { FillerWordRemoval } from "../FillerWordRemoval";
 import { VadBackendSelector } from "../VadBackendSelector";
 import { PersonalPasteSettings } from "../../personal/PersonalPasteSettings";
 import { PersonalDatasetSettings } from "../../personal/PersonalDatasetSettings";
+import { PersonalProfilesSettings } from "../../personal/PersonalProfilesSettings";
 
 export const AdvancedSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -60,6 +61,8 @@ export const AdvancedSettings: React.FC = () => {
         <AppendTrailingSpace descriptionMode="tooltip" grouped={true} />
         <PersonalDatasetSettings descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
+
+      <PersonalProfilesSettings />
 
       <SettingsGroup title={t("settings.advanced.groups.history")}>
         <HistoryLimit descriptionMode="tooltip" grouped={true} />

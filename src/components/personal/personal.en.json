@@ -87,5 +87,24 @@
       "hedgesPer100": "Hedges/100w",
       "medianPause": "Median pause (s)"
     }
+  },
+  "profiles": {
+    "title": "App profiles",
+    "description": "Matched on the frontmost app's bundle id (a trailing * matches a prefix). \"Always\" runs the LLM with the profile's prompt even on the plain shortcut, when post-processing is enabled. Recently used apps are suggested in the bundle id field.",
+    "name": "Name",
+    "llm": "LLM",
+    "prompt": "Prompt",
+    "autoSubmit": "Auto-submit",
+    "llmModes": {
+      "default": "LLM: as configured",
+      "off": "LLM: never",
+      "always": "LLM: always"
+    },
+    "selectedPrompt": "Selected prompt",
+    "autoSubmitDefault": "Auto-submit: as configured",
+    "autoSubmitOn": "Auto-submit: on",
+    "autoSubmitOff": "Auto-submit: off",
+    "remove": "Remove",
+    "add": "Add profile"
   }
 }

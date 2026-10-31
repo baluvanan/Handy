@@ -821,7 +821,8 @@ fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool
 /// thread: it sleeps between steps (input injection hops via `with_enigo`).
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     let _paste = PASTE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let settings = get_settings(&app_handle);
+    // App profile for the paste target (auto-submit override).
+    let settings = crate::personal::profiles::for_paste(get_settings(&app_handle));
 
     // Never paste into a password field without the user noticing.
     crate::personal::paste_guard::check(&app_handle, &settings)?;

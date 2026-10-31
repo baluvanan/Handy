@@ -684,6 +684,7 @@ pub fn run(cli_args: CliArgs) {
             personal::settings::update_personal_settings,
             personal::insights::get_speech_insights,
             personal::insights::generate_coaching_note,
+            personal::profiles::get_recent_app_ids,
             shortcut::change_paste_method_setting,
             shortcut::get_available_typing_tools,
             shortcut::change_typing_tool_setting,

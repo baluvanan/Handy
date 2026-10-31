@@ -327,6 +327,16 @@ impl DatasetStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Distinct frontmost-app bundle ids, most recently used first.
+    pub fn recent_app_ids(&self, limit: usize) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT app_bundle_id FROM dictation_log WHERE app_bundle_id IS NOT NULL
+             GROUP BY app_bundle_id ORDER BY MAX(created_at) DESC LIMIT ?1",
+        )?;
+        let ids = stmt.query_map([limit as i64], |row| row.get(0))?;
+        Ok(ids.collect::<rusqlite::Result<Vec<String>>>()?)
+    }
+
     pub fn count(&self) -> Result<i64> {
         Ok(self
             .conn
@@ -630,6 +640,19 @@ mod tests {
         expected.id = id;
         expected.history_id = Some(7);
         assert_eq!(got[0], expected);
+    }
+
+    #[test]
+    fn recent_app_ids_are_distinct_and_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memory_store(dir.path());
+        for (ts, app) in [(1, "com.a"), (2, "com.b"), (3, "com.a")] {
+            let mut r = sample_record(ts, "x");
+            r.app_bundle_id = Some(app.into());
+            store.insert(&r).unwrap();
+        }
+        store.insert(&sample_record(4, "no app")).unwrap();
+        assert_eq!(store.recent_app_ids(10).unwrap(), vec!["com.a", "com.b"]);
     }
 
     #[test]

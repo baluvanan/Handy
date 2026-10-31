@@ -415,7 +415,20 @@ pub(crate) async fn process_transcription_output(
     transcription: &str,
     post_process: bool,
 ) -> ProcessedTranscription {
-    let settings = get_settings(app);
+    process_transcription_output_with(app, transcription, post_process, None).await
+}
+
+/// `prompt_override`: an app profile's prompt, used instead of the selected one.
+pub(crate) async fn process_transcription_output_with(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+    prompt_override: Option<String>,
+) -> ProcessedTranscription {
+    let mut settings = get_settings(app);
+    if prompt_override.is_some() {
+        settings.post_process_selected_prompt_id = prompt_override;
+    }
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
@@ -668,7 +681,13 @@ impl ShortcutAction for TranscribeAction {
         play_feedback_sound(app, SoundType::Stop);
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
-        let post_process = self.post_process;
+                                                 // Per-app profile: may force the LLM on/off and pick its prompt.
+        let llm_plan = personal::profiles::llm_plan(
+            &get_settings(app),
+            stop_ctx.app_bundle_id.as_deref(),
+            self.post_process,
+        );
+        let post_process = llm_plan.post_process;
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -776,7 +795,12 @@ impl ShortcutAction for TranscribeAction {
                             }
                             let llm_started = Instant::now();
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                process_transcription_output_with(
+                                    &ah,
+                                    &transcription,
+                                    post_process,
+                                    llm_plan.prompt_override.clone(),
+                                ),
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await

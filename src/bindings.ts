@@ -224,6 +224,18 @@ async generateCoachingNote() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Distinct bundle ids seen in the dataset, most recent first, so the
+ * profile editor can offer them (Handy itself is frontmost while editing).
+ */
+async getRecentAppIds() : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_recent_app_ids") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changePasteMethodSetting(method: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_paste_method_setting", { method }) };
@@ -1050,8 +1062,10 @@ async updateRecordingRetentionPeriod(period: string) : Promise<Result<null, stri
 }
 },
 /**
- * Stub implementation for non-macOS platforms
- * Always returns false since laptop detection is macOS-specific
+ * Checks if the Mac is a laptop by detecting battery presence
+ * 
+ * This uses pmset to check for battery information.
+ * Returns true if a battery is detected (laptop), false otherwise (desktop)
  */
 async isLaptop() : Promise<Result<boolean, string>> {
     try {
@@ -1110,6 +1124,24 @@ words_per_minute: number;
  * Words per minute of recording (including pauses).
  */
 words_per_minute_overall: number; fillers: CountRate; fillers_by_word: Partial<{ [key in string]: CountRate }>; pauses: PauseStats; false_starts: CountRate; repeated_words: CountRate; hedges: CountRate; hedges_by_phrase: Partial<{ [key in string]: CountRate }>; unique_words: number; type_token_ratio: number; mattr: number }
+export type AppProfile = { 
+/**
+ * Display name.
+ */
+name: string; 
+/**
+ * Bundle id, e.g. `com.tinyspeck.slackmacgap`. A trailing `*` matches a
+ * prefix (`com.jetbrains.*`). Case-insensitive.
+ */
+bundle_id: string; llm: ProfileLlm; 
+/**
+ * Prompt to use when the LLM runs here; `None` keeps the selected one.
+ */
+prompt_id: string | null; 
+/**
+ * Auto-submit override; `None` keeps the global setting.
+ */
+auto_submit: boolean | null; enabled: boolean }
 /**
  * The container-level `serde(default)` (backed by the `Default` impl below)
  * guarantees every field — including ones added in the future — falls back to
@@ -1431,7 +1463,11 @@ verbatim_prompt: string;
  * Budget for LLM post-processing (health check + call). Past it, the
  * rule-cleaned text is pasted instead.
  */
-llm_timeout_ms: number }
+llm_timeout_ms: number; 
+/**
+ * Per-app behaviour keyed on the frontmost app's bundle id.
+ */
+app_profiles: AppProfile[] }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.
@@ -1446,6 +1482,23 @@ export type PostProcessApiFormat =
  */
 "anthropic"
 export type PostProcessProvider = { id: string; label: string; base_url: string; allow_base_url_edit?: boolean; models_endpoint?: string | null; supports_structured_output?: boolean; api_format?: PostProcessApiFormat }
+/**
+ * What a profile does about LLM post-processing.
+ */
+export type ProfileLlm = 
+/**
+ * As configured: the LLM runs only for the post-processing shortcut.
+ */
+"default" | 
+/**
+ * Never run the LLM in this app (e.g. terminals), whatever the shortcut.
+ */
+"off" | 
+/**
+ * Always run the LLM in this app, even on the plain shortcut (when
+ * post-processing is enabled at all).
+ */
+"always"
 /**
  * Recording phase events for windows that follow along (onboarding's Try it).
  */

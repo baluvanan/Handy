@@ -15,6 +15,7 @@ pub mod paste_guard;
 pub mod pasteboard;
 #[cfg(target_os = "macos")]
 pub mod pasteboard_macos;
+pub mod profiles;
 pub mod settings;
 pub mod timeline;
 pub mod verbatim;
@@ -23,3 +24,10 @@ pub mod verbatim;
 /// and builds carry no updater signing key. Forces update checks off exactly
 /// like `HANDY_DISABLE_UPDATER=1` does (UI shows the toggle as locked).
 pub const UPDATER_DISABLED: bool = true;
+
+/// Fork defaults merged into settings on every load (prompts, selection).
+/// Hooked from `settings::ensure_post_process_defaults`.
+pub fn ensure_settings_defaults(settings: &mut crate::settings::AppSettings) -> bool {
+    let changed = lmstudio::ensure_defaults(settings);
+    profiles::ensure_defaults(settings) || changed
+}

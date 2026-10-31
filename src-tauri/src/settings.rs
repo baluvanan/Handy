@@ -945,7 +945,7 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
         }
     }
 
-    changed |= crate::personal::lmstudio::ensure_defaults(settings);
+    changed |= crate::personal::ensure_settings_defaults(settings);
 
     changed
 }
