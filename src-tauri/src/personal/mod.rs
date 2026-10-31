@@ -16,6 +16,7 @@ pub mod pasteboard;
 #[cfg(target_os = "macos")]
 pub mod pasteboard_macos;
 pub mod profiles;
+mod schema_fixture;
 pub mod settings;
 pub mod timeline;
 pub mod verbatim;
