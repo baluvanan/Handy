@@ -100,7 +100,10 @@ class StopSignal:
         self.busy = threading.Event()
         self.busy_reason = ""
         self.stop_reason: str | None = None
-        self._last_extra = 0.0
+        # -inf, not 0: monotonic() counts from boot, so right after login
+        # (launchd RunAtLoad) or on a fresh CI runner it can be smaller than
+        # the interval, which would skip the first check.
+        self._last_extra = float("-inf")
         self._closed = threading.Event()
         self._thread: threading.Thread | None = None
 

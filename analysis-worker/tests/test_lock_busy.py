@@ -74,6 +74,18 @@ def test_stop_signal_sees_the_flag_within_the_poll_interval(tmp_path: Path) -> N
         sig.close()
 
 
+def test_first_extra_check_runs_right_after_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # monotonic() counts from boot: a Mac that just logged in (RunAtLoad)
+    # or a fresh CI runner is only seconds into it. The first check must
+    # still run, or a battery/deadline stop would be missed.
+    monkeypatch.setattr("handy_worker.busy.time.monotonic", lambda: 1.0)
+    sig = busy.StopSignal(tmp_path / "none.json", extra=lambda: "on battery", extra_every_s=60)
+    assert sig.should_stop()
+    assert sig.stop_reason == "on battery"
+
+
 def test_stop_signal_extra_checks_are_rate_limited(tmp_path: Path) -> None:
     calls = {"n": 0}
 
