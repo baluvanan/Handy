@@ -132,6 +132,7 @@ class Runner:
         notifier: Callable[[str, str], None] | None = None,
         keep_awake: Callable[[], Callable[[], None]] | None = None,
         install_signal_handlers: bool = False,
+        stop_check_interval_s: float = 5.0,
     ) -> None:
         self.paths = paths
         self.config = config
@@ -141,6 +142,10 @@ class Runner:
         self.notifier = notifier
         self.keep_awake = keep_awake
         self.install_signal_handlers = install_signal_handlers
+        #: How often power/thermal/deadline/user-activity are re-checked
+        #: during decoding (each check runs pmset/ioreg). Handy's busy flag
+        #: is separate and always checked every 100 ms.
+        self.stop_check_interval_s = stop_check_interval_s
         self._signal_reason: str | None = None
 
     # -- entry point --------------------------------------------------------
@@ -234,7 +239,9 @@ class Runner:
         started = self.clock.now()
         deadline = deadline_for(trigger, self.config, started)
         stop = busy.StopSignal(
-            self.paths.busy_flag, extra=lambda: self._extra_stop_reason(trigger, deadline)
+            self.paths.busy_flag,
+            extra=lambda: self._extra_stop_reason(trigger, deadline),
+            extra_every_s=self.stop_check_interval_s,
         ).start()
         release_awake = self._keep_awake()
         previous_handlers = self._install_signals(stop)
@@ -404,6 +411,7 @@ class Runner:
             return
         began = self.clock.monotonic()
         quiet_since: float | None = None
+        last_extra = float("-inf")
         while True:
             now = self.clock.monotonic()
             if stop.busy.is_set():
@@ -417,10 +425,13 @@ class Runner:
                 return
             if stop.stop_reason is not None:
                 return
-            extra = self._extra_stop_reason(MANUAL, None)
-            if extra:
-                stop.request_stop(extra)
-                return
+            # Power/thermal checks spawn pmset: at most every 5 s.
+            if now - last_extra >= self.stop_check_interval_s:
+                last_extra = now
+                extra = self._extra_stop_reason(MANUAL, None)
+                if extra:
+                    stop.request_stop(extra)
+                    return
             self.clock.sleep(0.25)
 
     # -- plumbing -------------------------------------------------------------

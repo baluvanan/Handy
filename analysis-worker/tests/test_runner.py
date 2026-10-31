@@ -42,6 +42,7 @@ def make_runner(
         clock=clock,
         notifier=(lambda a, b: notes.append((a, b))) if notes is not None else None,
         keep_awake=lambda: lambda: None,
+        stop_check_interval_s=0.5,
     )
     return r, t
 
@@ -297,6 +298,7 @@ def test_time_budget_stops_a_nightly_run(handy: HandyFixture) -> None:
         probe=FakeProbe(),
         clock=runner.Clock(now=lambda: next(times)),
         keep_awake=lambda: lambda: None,
+        stop_check_interval_s=0.5,
     )
     res = r.run(runner.SCHEDULE)
     assert res.outcome == runner.PARTIAL and "time budget" in res.message

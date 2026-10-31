@@ -90,7 +90,7 @@ class StopSignal:
         self,
         flag_path: Path,
         extra: Callable[[], str | None] | None = None,
-        extra_every_s: float = 2.0,
+        extra_every_s: float = 5.0,
         poll_s: float = POLL_S,
     ) -> None:
         self.flag_path = flag_path
