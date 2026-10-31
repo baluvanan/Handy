@@ -182,7 +182,11 @@ class ResultsDb:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, timeout=10, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")  # Handy reads while we write
+        # Rollback journal, not WAL: Handy opens this file with mode=ro, which
+        # SQLite can't do for a WAL database whose -shm file is missing.
+        # Writes are small, short transactions; Handy's reads wait on the
+        # busy timeout.
+        conn.execute("PRAGMA journal_mode = DELETE")
         conn.execute("PRAGMA busy_timeout = 10000")
         conn.execute("PRAGMA foreign_keys = ON")
         db = cls(conn, path)

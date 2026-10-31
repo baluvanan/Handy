@@ -33,11 +33,19 @@ def success(db: rdb.ResultsDb, entry_id: int, text: str = "um hi", dur: float = 
     )
 
 
-def test_migrates_once_and_is_wal(tmp_path: Path) -> None:
+def test_migrates_once_and_is_readable_read_only(tmp_path: Path) -> None:
     db = open_db(tmp_path)
     assert db.version() == rdb.SCHEMA_VERSION
-    assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
     db.close()
+    # Handy opens it like this.
+    import sqlite3
+
+    from handy_worker.handy_db import ro_uri
+
+    ro = sqlite3.connect(ro_uri(tmp_path / "verbatim" / "verbatim.db"), uri=True)
+    assert ro.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0] == 0
+    ro.close()
     db = open_db(tmp_path)
     assert db.version() == rdb.SCHEMA_VERSION
     db.close()
