@@ -2,7 +2,7 @@
 name = "handy-worker"
 # Bump on every change Handy must notice (it compares this with the
 # installed environment and offers a one-click re-sync).
-version = "0.1.0"
+version = "0.2.0"
 description = "Handy Personal's background verbatim-analysis worker (local only)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

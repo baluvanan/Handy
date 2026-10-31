@@ -40,7 +40,7 @@
   "insights": {
     "sidebar": "Insights",
     "title": "Speech insights",
-    "subtitle": "From your raw dictations (before cleanup). Computed locally.",
+    "subtitle": "From verbatim transcripts where the background worker has made them, otherwise from your raw dictations. Computed locally.",
     "empty": "No dictations in this range yet.",
     "range": {
       "days": "{{count}}d",
@@ -66,7 +66,8 @@
       "per100": "/ 100 words",
       "seconds": "s",
       "mattr": "MATTR",
-      "words": "{{count}} words"
+      "words": "{{count}} words",
+      "withEstimateNote": "≈{{estimate}} incl. estimated"
     },
     "breakdown": {
       "fillers": "Fillers by word",
@@ -75,9 +76,10 @@
     },
     "coaching": {
       "title": "Weekly coaching note",
-      "description": "Sends this week's and last week's aggregate numbers (never your transcripts) to your post-processing LLM.",
+      "description": "Sends this week's and last week's aggregate numbers (never your transcripts) to your coaching LLM (local LM Studio by default).",
       "button": "Get note",
-      "busy": "Thinking…"
+      "busy": "Thinking…",
+      "weekly": "Weekly notes"
     },
     "table": {
       "show": "Show as table",
@@ -86,6 +88,16 @@
       "fillersPerMin": "Fillers/min",
       "hedgesPer100": "Hedges/100w",
       "medianPause": "Median pause (s)"
+    },
+    "withEstimate": "incl. estimated fillers",
+    "basis": "{{verbatim}} of {{total}} dictations measured from verbatim transcripts.",
+    "basisEstimate": "For the rest, fillers Parakeet dropped are estimated from speech time (dashed lines; calibrated on {{samples}} verbatim dictations).",
+    "frozen": "Some periods keep results from older metric definitions (marked ▼ on the charts).",
+    "recompute": "Recompute with current definitions",
+    "breaks": {
+      "legend": "calculation or source changed",
+      "definitions": "Metric definition changed ({{detail}}): not a change in how you speak.",
+      "source": "Measurement source changed ({{detail}})."
     }
   },
   "profiles": {
@@ -106,5 +118,135 @@
     "autoSubmitOff": "Auto-submit: off",
     "remove": "Remove",
     "add": "Add profile"
+  },
+  "verbatim": {
+    "health": {
+      "ok": "Healthy",
+      "needs_attention": "Needs attention",
+      "out_of_date": "Out of date",
+      "not_synced": "Not set up",
+      "broken": "Broken",
+      "missing": "Worker missing",
+      "no_uv": "uv not found"
+    },
+    "operation": "Working: {{op}}…",
+    "outcome": {
+      "ok": "Done",
+      "partial": "Stopped early (resumes next run)",
+      "skipped": "Skipped",
+      "blocked": "Needs attention",
+      "error": "Failed",
+      "crashed": "Crashed",
+      "running": "Running"
+    },
+    "actions": {
+      "fix": "Fix",
+      "runNow": "Run now",
+      "running": "Running…",
+      "refresh": "Refresh",
+      "retry": "Retry",
+      "retryAll": "Retry all",
+      "revealLogs": "Reveal logs",
+      "doctor": "Run checks",
+      "doctorBusy": "Checking…"
+    },
+    "panel": {
+      "title": "Verbatim analysis",
+      "disabled": "Verbatim analysis is off. Turn it on in Settings → Advanced to count the fillers Parakeet drops.",
+      "lastRun": "Last run",
+      "never": "Never",
+      "outcome": "Outcome",
+      "lastRunCounts": "Last run did",
+      "counts": "{{done}} done · {{failed}} failed · {{skipped}} skipped",
+      "queue": "Waiting",
+      "done": "Transcribed",
+      "model": "Model",
+      "disk": "Disk",
+      "diskValue": "{{used}} used · {{free}} free",
+      "versions": "Versions",
+      "versionsValue": "worker {{worker}} · Handy expects {{expected}}",
+      "launchd": "Schedule",
+      "loaded": "installed (last exit {{exit}})",
+      "notLoaded": "not installed",
+      "failures_one": "{{count}} recording needs attention",
+      "failures_other": "{{count}} recordings need attention",
+      "attempts_one": "failed {{count}} time",
+      "attempts_other": "failed {{count}} times",
+      "skipped": "skipped ({{reason}})"
+    },
+    "settings": {
+      "group": "Verbatim analysis",
+      "groupDescription": "Re-transcribes your recordings with a verbatim model (CrisperWhisper, CC BY-NC 4.0) when you're not using the Mac, so Insights can count fillers. Fully local; never slows down dictation.",
+      "macOnly": "The background service runs on macOS only.",
+      "missing": "No worker found at {{dir}}. Set the worker folder below.",
+      "noUv": "uv was not found. Install it (https://docs.astral.sh/uv/) or set its path below.",
+      "enabled": {
+        "title": "Background verbatim analysis",
+        "description": "Installs a launchd agent that runs nightly and at login, and lets Handy start a run when you've been idle. Turning it off removes the agent and keeps all data."
+      },
+      "schedule": {
+        "title": "Nightly run",
+        "description": "When the nightly run starts. A missed run (Mac off or asleep) catches up later."
+      },
+      "idle": {
+        "title": "Run when idle",
+        "description": "Start a run when you haven't touched the Mac for a while and recordings are waiting. It stops as soon as you're back."
+      },
+      "idleMinutes": {
+        "title": "Idle for (minutes)",
+        "description": "How long without keyboard or mouse input before a run starts."
+      },
+      "battery": {
+        "title": "Skip on battery",
+        "description": "Don't run (and stop) while on battery. Low Power Mode, thermal throttling and low disk/memory always skip."
+      },
+      "budget": {
+        "title": "Time budget",
+        "description": "Nightly runs stop by a set time and continue on the next run."
+      },
+      "stopBy": {
+        "title": "Stop by",
+        "description": "Nightly runs end at this time."
+      },
+      "autoUpdate": {
+        "title": "Update the worker automatically",
+        "description": "After you pull a new version of the fork, re-sync the worker's environment (uv sync) without asking."
+      },
+      "retention": {
+        "title": "Audio retention",
+        "description": "Compress old recordings losslessly and delete very old audio, only when a verified verbatim transcript exists. Off by default; shows a preview first.",
+        "preview": "Preview"
+      },
+      "retentionDays": {
+        "title": "Retention rule (days)",
+        "description": "Compress WAVs to FLAC after this many days; delete audio after this many days if a verified verbatim transcript exists. 0 = never.",
+        "compress": "Compress after",
+        "delete": "delete after"
+      },
+      "coaching": {
+        "title": "Weekly coaching note",
+        "description": "Every Monday, sends last week's aggregate metrics (never transcripts) to your coaching LLM and keeps the note on the Insights page."
+      },
+      "coachingProvider": {
+        "title": "Coaching LLM",
+        "description": "LM Studio (local) by default."
+      },
+      "paths": {
+        "title": "Worker and uv paths",
+        "description": "Leave empty for the fork's analysis-worker/ folder and uv's usual install location. Use absolute paths.",
+        "uvAuto": "uv: auto-detect"
+      }
+    },
+    "retentionPreview": {
+      "title": "Retention preview",
+      "description": "What the next retention pass would do with the current rule.",
+      "compress_one": "Compress {{count}} recording ({{size}}, saves about {{saved}}). Lossless; checked before the WAV is removed.",
+      "compress_other": "Compress {{count}} recordings ({{size}}, saves about {{saved}}). Lossless; checked before the WAV is removed.",
+      "delete_one": "Delete the audio of {{count}} recording ({{size}}) that has a verified verbatim transcript.",
+      "delete_other": "Delete the audio of {{count}} recordings ({{size}}) that have a verified verbatim transcript.",
+      "kept": "Kept regardless: {{unprocessed}} without a verbatim transcript, {{unverified}} with an unverified one, {{history}} still in History.",
+      "enable": "Enable retention",
+      "cancel": "Close"
+    }
   }
 }

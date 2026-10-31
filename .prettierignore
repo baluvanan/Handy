@@ -19,3 +19,7 @@ src-tauri/src/catalog/catalog.json
 # Misc
 .DS_Store
 *.log
+analysis-worker/.venv
+analysis-worker/.pytest_cache
+analysis-worker/.mypy_cache
+analysis-worker/.ruff_cache

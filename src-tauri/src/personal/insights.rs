@@ -1,23 +1,80 @@
 //! Tauri commands for the Insights page, and the weekly coaching note.
 //!
 //! The coaching note sends **aggregated metrics only** (rates, counts, which
-//! fixed filler/hedge words occurred) to the configured post-processing LLM.
-//! Transcript text never leaves the machine; `coaching_payload` is unit
-//! tested for that.
+//! fixed filler/hedge words occurred) to the coaching LLM — the local LM
+//! Studio provider by default. Transcript text never leaves the machine;
+//! `coaching_payload` is unit tested for that.
+//!
+//! Reports prefer verbatim transcripts from the background worker and keep
+//! stored per-period results with their metric definition versions
+//! (`metric_snapshots`).
 
 use std::time::Duration;
 
+use chrono::Datelike;
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::analysis::{report, Aggregate, InsightsReport, PeriodAggregate};
+use super::analysis::{report_with, Aggregate, AnalysisContext, InsightsReport, PeriodAggregate};
 use super::dataset::DatasetStore;
+
+/// Builds the report from the dictation log plus verbatim transcripts, and
+/// reconciles it with stored results. Works without the worker (no verbatim
+/// data → raw text plus estimates).
+pub fn build_report(
+    app_data_dir: &std::path::Path,
+    since: Option<i64>,
+) -> Result<InsightsReport, String> {
+    let store = DatasetStore::open(app_data_dir).map_err(|e| format!("{e:#}"))?;
+    // Calibrate on everything, report on the requested range.
+    let all = store.records(None).map_err(|e| format!("{e:#}"))?;
+    let verbatim = super::verbatim_store::load(app_data_dir).unwrap_or_else(|e| {
+        log::warn!("Verbatim transcripts unavailable: {e:#}");
+        Default::default()
+    });
+    let ctx = AnalysisContext::new(&all, verbatim);
+    let records: Vec<_> = all
+        .into_iter()
+        .filter(|r| since.is_none_or(|s| r.created_at >= s))
+        .collect();
+    let mut report = report_with(&records, since, &ctx);
+    match super::metric_snapshots::open(&super::metric_snapshots::db_path(app_data_dir)) {
+        // Partial ranges cut weeks short; only stabilize full-history runs.
+        Ok(conn) if since.is_none() => {
+            if let Err(e) = super::metric_snapshots::stabilize(&conn, &mut report) {
+                log::warn!("Metric snapshots: {e:#}");
+            }
+        }
+        Ok(conn) => {
+            // Use stored (frozen) results for the periods in range too.
+            if let Err(e) = super::metric_snapshots::stabilize_read_only(&conn, &mut report) {
+                log::warn!("Metric snapshots: {e:#}");
+            }
+        }
+        Err(e) => log::warn!("Metric snapshots unavailable: {e:#}"),
+    }
+    Ok(report)
+}
 
 fn load_report(app: &AppHandle, since: Option<i64>) -> Result<InsightsReport, String> {
     let dir = crate::portable::app_data_dir(app).map_err(|e| e.to_string())?;
-    let store = DatasetStore::open(&dir).map_err(|e| format!("{e:#}"))?;
-    let records = store.records(since).map_err(|e| format!("{e:#}"))?;
-    Ok(report(&records, since))
+    build_report(&dir, since)
+}
+
+/// Recomputes every stored period with the current metric definitions
+/// (removes "definitions changed" markers).
+#[tauri::command]
+#[specta::specta]
+pub async fn recompute_speech_metrics(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = crate::portable::app_data_dir(&app).map_err(|e| e.to_string())?;
+        let conn = super::metric_snapshots::open(&super::metric_snapshots::db_path(&dir))
+            .map_err(|e| format!("{e:#}"))?;
+        super::metric_snapshots::clear(&conn).map_err(|e| format!("{e:#}"))?;
+        build_report(&dir, None).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn since_days_ago(days: u32) -> i64 {
@@ -54,6 +111,8 @@ struct CoachingWeek<'a> {
 
 pub const COACHING_SYSTEM_PROMPT: &str = "You are a warm, practical speaking coach. \
 You receive weekly aggregate speech metrics from someone's own dictation (no transcripts). \
+`fillers` are counted from verbatim transcripts where available; `estimated_fillers` is a \
+rough estimate for the rest, so treat it as uncertain. \
 Write a short, encouraging note (under 150 words): one sentence on what went well, \
 then 2-3 concrete, specific things to practise this week, tied to the numbers \
 (fillers per minute and which fillers, hedges, pauses, false starts, words per minute, \
@@ -77,29 +136,73 @@ pub fn coaching_payload(report: &InsightsReport) -> Option<String> {
     serde_json::to_string_pretty(&serde_json::json!({
         "this_week": payload[0],
         "previous_week": payload.get(1),
-        "notes": "Rates are per minute of detected speech. Pauses shorter than ~0.5 s are not detected.",
+        "notes": "Rates are per minute of detected speech. Pauses shorter than ~0.5 s are not detected. \
+basis.verbatim = dictations measured from verbatim transcripts; basis.asr_only = from the \
+dictation model's text, whose dropped fillers are only estimated (estimated_fillers).",
     }))
     .ok()
 }
 
-/// Asks the configured post-processing LLM for a short coaching note based
-/// on the last two weeks of aggregate metrics.
+/// The coaching LLM: the one chosen in the verbatim settings, LM Studio (local)
+/// by default; the active post-processing provider only if neither exists.
+pub fn coaching_provider(
+    settings: &crate::settings::AppSettings,
+) -> Option<crate::settings::PostProcessProvider> {
+    let wanted = settings
+        .personal
+        .verbatim_service
+        .coaching_provider_id
+        .as_str();
+    settings
+        .post_process_providers
+        .iter()
+        .find(|p| p.id == wanted)
+        .or_else(|| {
+            settings
+                .post_process_providers
+                .iter()
+                .find(|p| p.id == super::lmstudio::PROVIDER_ID)
+        })
+        .or_else(|| settings.active_post_process_provider())
+        .cloned()
+}
+
+/// Asks the coaching LLM (local LM Studio by default) for a short coaching
+/// note based on the last two weeks of aggregate metrics.
 #[tauri::command]
 #[specta::specta]
 pub async fn generate_coaching_note(app: AppHandle) -> Result<String, String> {
-    let since = Some(since_days_ago(14));
+    coaching_note(&app, false).await.map(|(_, text)| text)
+}
+
+/// Builds and sends the coaching request. With `complete_weeks_only` the
+/// current (unfinished) ISO week is left out (the scheduled weekly note).
+/// Returns the week the note is about and the note.
+pub async fn coaching_note(
+    app: &AppHandle,
+    complete_weeks_only: bool,
+) -> Result<(String, String), String> {
+    let since = Some(since_days_ago(if complete_weeks_only { 21 } else { 14 }));
     let app_for_report = app.clone();
-    let report = tauri::async_runtime::spawn_blocking(move || load_report(&app_for_report, since))
-        .await
-        .map_err(|e| e.to_string())??;
+    let mut report =
+        tauri::async_runtime::spawn_blocking(move || load_report(&app_for_report, since))
+            .await
+            .map_err(|e| e.to_string())??;
+    if complete_weeks_only {
+        let today = chrono::Local::now().date_naive().iso_week();
+        let current = format!("{}-W{:02}", today.year(), today.week());
+        report.weeks.retain(|w| w.period != current);
+    }
+    let week = report
+        .weeks
+        .last()
+        .map(|w| w.period.clone())
+        .ok_or("No dictations in the last two weeks yet.".to_string())?;
     let payload =
         coaching_payload(&report).ok_or("No dictations in the last two weeks yet.".to_string())?;
 
-    let settings = crate::settings::get_settings(&app);
-    let provider = settings
-        .active_post_process_provider()
-        .cloned()
-        .ok_or("No post-processing provider is selected.")?;
+    let settings = crate::settings::get_settings(app);
+    let provider = coaching_provider(&settings).ok_or("No coaching LLM provider is available.")?;
     let model = settings
         .post_process_models
         .get(&provider.id)
@@ -118,7 +221,7 @@ pub async fn generate_coaching_note(app: AppHandle) -> Result<String, String> {
     let budget = Duration::from_millis(settings.personal.llm_timeout_ms.max(60_000));
     let call = crate::llm_client::send_chat_completion(&provider, api_key, &model, prompt, true);
     match tokio::time::timeout(budget, call).await {
-        Ok(Ok(Some(text))) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Ok(Ok(Some(text))) if !text.trim().is_empty() => Ok((week, text.trim().to_string())),
         Ok(Ok(_)) => Err("The LLM returned no text.".into()),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(format!("{} did not answer in time.", provider.label)),
@@ -128,6 +231,7 @@ pub async fn generate_coaching_note(app: AppHandle) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::personal::analysis::report;
     use crate::personal::dataset::DictationRecord;
     use crate::personal::timeline::Segment;
 

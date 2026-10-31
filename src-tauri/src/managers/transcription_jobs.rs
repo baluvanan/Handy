@@ -284,8 +284,17 @@ impl TranscriptionJobManager {
         let tm = Arc::clone(&self.app.state::<Arc<TranscriptionManager>>());
         let entry = tauri::async_runtime::block_on(hm.get_entry_by_id(entry_id))?
             .ok_or_else(|| anyhow!("History entry {} not found", entry_id))?;
-        let samples = read_wav_samples(hm.get_audio_file_path(&entry.file_name))
-            .map_err(|e| anyhow!("Failed to load audio: {}", e))?;
+        // Retention may have compressed old recordings to FLAC.
+        let path = hm.get_audio_file_path(&entry.file_name);
+        let samples = if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        {
+            read_wav_samples(&path)
+        } else {
+            decode_audio_file(&path)
+        }
+        .map_err(|e| anyhow!("Failed to load audio: {}", e))?;
         if samples.is_empty() {
             return Err(anyhow!("Recording has no audio samples"));
         }
