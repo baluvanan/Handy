@@ -1,0 +1,23 @@
+{
+  "notices": {
+    "pasteBlockedSecureField": {
+      "title": "Not pasted into a password field",
+      "description": "A secure text field had focus. The transcript is in History."
+    },
+    "llmFallback": {
+      "title": "Cleanup LLM unavailable",
+      "description": "Pasted the rule-cleaned text instead."
+    }
+  },
+  "settings": {
+    "groupTitle": "Handy Personal",
+    "reliablePaste": {
+      "title": "Reliable Paste",
+      "description": "Restore your clipboard only after the target app has read the transcript, and restore every item and format exactly. Turn off to use the legacy timed paste as a fallback. macOS and Windows only."
+    },
+    "blockSecureFields": {
+      "title": "Never paste into password fields",
+      "description": "When a secure text field has focus (or macOS Secure Input is on), skip the paste and show a notice instead. The transcript stays in History."
+    }
+  }
+}

@@ -8,6 +8,7 @@ use crate::managers::model::ModelManager;
 use crate::managers::transcription::policy::{live_decode, LiveDecode, ModelTraits};
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::{Transcription, TranscriptionManager};
+use crate::personal::paste_guard;
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -837,7 +838,7 @@ impl ShortcutAction for TranscribeAction {
                                                 }
                                                 Err(e) => {
                                                     error!("Failed to paste transcription: {}", e);
-                                                    let _ = ah_clone.emit("paste-error", ());
+                                                    paste_guard::emit_paste_error(&ah_clone, &e);
                                                     TranscriptionOutcome::Failed
                                                 }
                                             };

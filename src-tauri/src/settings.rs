@@ -511,10 +511,11 @@ pub struct AppSettings {
     pub paste_delay_ms: u64,
     #[serde(default = "default_paste_delay_after_ms")]
     pub paste_delay_after_ms: u64,
-    /// Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
-    /// after the target app actually reads the transcript, instead of after a
-    /// fixed delay. See `paste_tx`. macOS and Windows only.
-    #[serde(default)]
+    /// Receipt-sequenced paste: restore the clipboard only after the target
+    /// app actually reads the transcript, instead of after a fixed delay. See
+    /// `paste_tx`. macOS and Windows only; on by default on macOS (fork), the
+    /// legacy timed path stays selectable as a fallback.
+    #[serde(default = "default_reliable_paste")]
     pub reliable_paste: bool,
     #[serde(default = "default_typing_tool")]
     pub typing_tool: TypingTool,
@@ -561,6 +562,9 @@ pub struct AppSettings {
     /// `overlay_position` (position `none` → style `None`).
     #[serde(default = "default_overlay_style")]
     pub overlay_style: OverlayStyle,
+    /// Fork-only settings (Handy Personal); see `personal::settings`.
+    #[serde(default)]
+    pub personal: crate::personal::settings::PersonalSettings,
 }
 
 fn default_model() -> String {
@@ -667,6 +671,10 @@ fn default_paste_delay_ms() -> u64 {
 
 fn default_paste_delay_after_ms() -> u64 {
     60
+}
+
+fn default_reliable_paste() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn default_auto_submit() -> bool {
@@ -1043,7 +1051,7 @@ pub fn get_default_settings() -> AppSettings {
         show_tray_icon: default_show_tray_icon(),
         paste_delay_ms: default_paste_delay_ms(),
         paste_delay_after_ms: default_paste_delay_after_ms(),
-        reliable_paste: false,
+        reliable_paste: default_reliable_paste(),
         typing_tool: default_typing_tool(),
         external_script_path: None,
         filler_word_removal_enabled: default_filler_word_removal_enabled(),
@@ -1058,6 +1066,7 @@ pub fn get_default_settings() -> AppSettings {
         language_detection: LanguageDetectionMode::default(),
         language_detection_window_secs: default_language_detection_window_secs(),
         overlay_style: default_overlay_style(),
+        personal: Default::default(),
     }
 }
 

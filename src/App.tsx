@@ -31,6 +31,7 @@ import {
 import { DebugSettings, ModelsSettings } from "./components/settings";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FileDropOverlay } from "./components/FileDropOverlay";
+import { PersonalNotices } from "./components/personal/PersonalNotices";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
 import { WhatsNewGate } from "./components/whats-new";
 import { useSettings } from "./hooks/useSettings";
@@ -459,6 +460,7 @@ function App() {
   return (
     <>
       {toaster}
+      <PersonalNotices />
       {content}
     </>
   );

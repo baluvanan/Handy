@@ -189,6 +189,17 @@ async changeReliablePasteSetting(enabled: boolean) : Promise<Result<null, string
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Replaces the fork's settings block in one go.
+ */
+async updatePersonalSettings(personal: PersonalSettings) : Promise<Result<PersonalSettings, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_personal_settings", { personal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async changePasteMethodSetting(method: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_paste_method_setting", { method }) };
@@ -1035,6 +1046,7 @@ async isLaptop() : Promise<Result<boolean, string>> {
 
 export const events = __makeEvents__<{
 historyUpdatePayload: HistoryUpdatePayload,
+personalNotice: PersonalNotice,
 recordingStateEvent: RecordingStateEvent,
 streamPhaseEvent: StreamPhaseEvent,
 streamTextEvent: StreamTextEvent,
@@ -1042,6 +1054,7 @@ transcriptionCompleteEvent: TranscriptionCompleteEvent,
 transcriptionJob: TranscriptionJob
 }>({
 historyUpdatePayload: "history-update-payload",
+personalNotice: "personal-notice",
 recordingStateEvent: "recording-state-event",
 streamPhaseEvent: "stream-phase-event",
 streamTextEvent: "stream-text-event",
@@ -1102,9 +1115,10 @@ selected_channel?: number | null; clamshell_microphone?: string | null; selected
  */
 spoken_languages?: string[]; overlay_position?: OverlayPosition; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; theme?: Theme; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; paste_delay_after_ms?: number; 
 /**
- * Debug-gated ("beta") receipt-sequenced paste: restore the clipboard only
- * after the target app actually reads the transcript, instead of after a
- * fixed delay. See `paste_tx`. macOS and Windows only.
+ * Receipt-sequenced paste: restore the clipboard only after the target
+ * app actually reads the transcript, instead of after a fixed delay. See
+ * `paste_tx`. macOS and Windows only; on by default on macOS (fork), the
+ * legacy timed path stays selectable as a fallback.
  */
 reliable_paste?: boolean; typing_tool?: TypingTool; external_script_path?: string | null; filler_word_removal_enabled?: boolean; custom_filler_words?: string[] | null; 
 /**
@@ -1138,7 +1152,11 @@ language_detection_window_secs?: number;
  * not gated on this — that follows model capability. Migrated from the old
  * `overlay_position` (position `none` → style `None`).
  */
-overlay_style?: OverlayStyle }
+overlay_style?: OverlayStyle; 
+/**
+ * Fork-only settings (Handy Personal); see `personal::settings`.
+ */
+personal?: PersonalSettings }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AutoUnavailableReason = 
@@ -1303,6 +1321,32 @@ export type OverlayStyle = "none" | "minimal" | "live"
 export type PaginatedHistory = { entries: HistoryEntry[]; has_more: boolean }
 export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_shift_v" | "external_script"
 export type PermissionAccess = "allowed" | "denied" | "unknown"
+export type PersonalNotice = { kind: PersonalNoticeKind; 
+/**
+ * Technical detail for the toast description (never transcript text).
+ */
+detail: string | null }
+export type PersonalNoticeKind = 
+/**
+ * Nothing was pasted because a password field had focus.
+ */
+"paste_blocked_secure_field" | 
+/**
+ * The cleanup LLM was unreachable or too slow; rule-cleaned text was
+ * pasted instead.
+ */
+"llm_fallback"
+/**
+ * Container-level `serde(default)`: any field missing from a stored settings
+ * object falls back to its default, so adding fields never breaks a load.
+ */
+export type PersonalSettings = { 
+/**
+ * Refuse to paste while a secure (password) text field is focused, or
+ * while macOS Secure Event Input is on. The transcript stays in History
+ * and a notice explains why nothing was pasted.
+ */
+block_paste_in_secure_fields: boolean }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.
