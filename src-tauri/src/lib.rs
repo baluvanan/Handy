@@ -18,6 +18,7 @@ mod managers;
 mod memory;
 mod overlay;
 mod paste_tx;
+mod personal;
 pub mod portable;
 mod secure_input;
 mod settings;
