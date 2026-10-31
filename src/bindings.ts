@@ -1360,7 +1360,12 @@ verbatim_mode: boolean;
 /**
  * The verbatim initial prompt; empty uses the built-in default.
  */
-verbatim_prompt: string }
+verbatim_prompt: string; 
+/**
+ * Budget for LLM post-processing (health check + call). Past it, the
+ * rule-cleaned text is pasted instead.
+ */
+llm_timeout_ms: number }
 /**
  * Request format a post-processing endpoint speaks. Built-in providers have a
  * fixed format; only the custom provider lets the user change it.

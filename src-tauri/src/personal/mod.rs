@@ -7,6 +7,7 @@
 pub mod cli;
 pub mod dataset;
 pub mod focus;
+pub mod lmstudio;
 pub mod notice;
 pub mod paste_guard;
 pub mod pasteboard;

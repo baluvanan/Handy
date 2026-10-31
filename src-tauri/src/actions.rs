@@ -246,7 +246,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     // Ask these providers to skip reasoning/thinking — post-processing rarely
     // benefits from it and it adds seconds of latency. llm_client picks the
     // field the endpoint understands and retries without it if rejected.
-    let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter");
+    let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter" | "lmstudio");
 
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
@@ -406,6 +406,8 @@ pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
+    /// Why the LLM result was not used, when post-processing was requested.
+    pub llm_fallback: Option<personal::lmstudio::FallbackReason>,
 }
 
 pub(crate) async fn process_transcription_output(
@@ -417,9 +419,14 @@ pub(crate) async fn process_transcription_output(
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
+    let mut llm_fallback = None;
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        // Never let a down or slow LLM fail (or stall) the dictation.
+        let llm = post_process_transcription(&settings, &final_text);
+        let guarded =
+            personal::lmstudio::post_process_guarded(app, &settings, llm, &mut llm_fallback);
+        if let Some(processed_text) = guarded.await {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -439,6 +446,7 @@ pub(crate) async fn process_transcription_output(
         final_text,
         post_processed_text,
         post_process_prompt,
+        llm_fallback,
     }
 }
 
@@ -795,7 +803,7 @@ impl ShortcutAction for TranscribeAction {
                                     trace: &trace,
                                     rule_cleaned_text: &transcription,
                                     llm_text: processed.post_processed_text.as_deref(),
-                                    llm_fallback_reason: None,
+                                    llm_fallback_reason: processed.llm_fallback.map(|r| r.as_str()),
                                     final_text: &processed.final_text,
                                     language: language.as_ref(),
                                     post_process_requested: post_process,

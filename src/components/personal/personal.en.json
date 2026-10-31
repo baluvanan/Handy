@@ -30,6 +30,11 @@
     "verbatimPrompt": {
       "title": "Verbatim prompt",
       "description": "Initial prompt given to Whisper in verbatim mode. Leave empty for the default."
+    },
+    "llmTimeout": {
+      "title": "LLM timeout",
+      "description": "If the LLM (e.g. LM Studio) is unreachable or takes longer than this, the rule-cleaned text is pasted instead and a small notice is shown. Dictation never fails because the LLM is down.",
+      "unit": "seconds"
     }
   }
 }

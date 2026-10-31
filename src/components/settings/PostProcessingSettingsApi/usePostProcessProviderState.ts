@@ -111,7 +111,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
         const hasBaseUrl = (provider?.base_url ?? "").trim() !== "";
         const hasApiKey = apiKey.trim() !== "";
 
-        if (provider?.id === "custom" ? hasBaseUrl : hasApiKey) {
+        if (provider?.allow_base_url_edit ? hasBaseUrl : hasApiKey) {
           void fetchPostProcessModels(providerId);
         }
       }
@@ -127,7 +127,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
   const handleBaseUrlChange = useCallback(
     (value: string) => {
-      if (!selectedProvider || selectedProvider.id !== "custom") {
+      if (!selectedProvider?.allow_base_url_edit) {
         return;
       }
       const trimmed = value.trim();

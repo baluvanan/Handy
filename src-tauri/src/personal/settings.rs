@@ -24,6 +24,9 @@ pub struct PersonalSettings {
     pub verbatim_mode: bool,
     /// The verbatim initial prompt; empty uses the built-in default.
     pub verbatim_prompt: String,
+    /// Budget for LLM post-processing (health check + call). Past it, the
+    /// rule-cleaned text is pasted instead.
+    pub llm_timeout_ms: u64,
 }
 
 impl Default for PersonalSettings {
@@ -33,6 +36,7 @@ impl Default for PersonalSettings {
             dataset_logging_enabled: true,
             verbatim_mode: false,
             verbatim_prompt: super::verbatim::DEFAULT_VERBATIM_PROMPT.to_string(),
+            llm_timeout_ms: super::lmstudio::DEFAULT_LLM_TIMEOUT_MS,
         }
     }
 }

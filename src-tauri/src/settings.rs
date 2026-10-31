@@ -805,6 +805,9 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
         api_format: PostProcessApiFormat::OpenAi,
     });
 
+    // Fork: local LM Studio server (personal::lmstudio).
+    providers.push(crate::personal::lmstudio::provider());
+
     // Custom provider always comes last
     providers.push(PostProcessProvider {
         id: "custom".to_string(),
@@ -941,6 +944,8 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
             }
         }
     }
+
+    changed |= crate::personal::lmstudio::ensure_defaults(settings);
 
     changed
 }
