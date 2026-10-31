@@ -24,6 +24,9 @@ pub enum PersonalNoticeKind {
     /// The cleanup LLM was unreachable or too slow; rule-cleaned text was
     /// pasted instead.
     LlmFallback,
+    /// The verbatim-analysis service needs attention (worker missing,
+    /// broken, not set up).
+    VerbatimServiceAttention,
 }
 
 impl PersonalNoticeKind {
@@ -38,6 +41,10 @@ impl PersonalNoticeKind {
             Self::LlmFallback => (
                 "Cleanup LLM unavailable",
                 "Pasted the rule-cleaned text instead.",
+            ),
+            Self::VerbatimServiceAttention => (
+                "Verbatim analysis needs attention",
+                "Open Handy → Settings → Verbatim analysis.",
             ),
         }
     }

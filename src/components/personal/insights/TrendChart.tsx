@@ -5,10 +5,23 @@ export interface TrendPoint {
   value: number;
 }
 
+/** A point where the series is not directly comparable to what came before
+ * (a metric definition or the verbatim source changed). */
+export interface TrendBreak {
+  label: string;
+  detail: string;
+}
+
 interface TrendChartProps {
   title: string;
   unit: string;
   points: TrendPoint[];
+  /** Same labels as `points`: measured value plus an estimate. Drawn dashed
+   * so estimates never look like measurements. */
+  estimate?: TrendPoint[];
+  estimateLabel?: string;
+  breaks?: TrendBreak[];
+  breakLabel?: string;
   format?: (v: number) => string;
   emptyLabel: string;
 }
@@ -30,6 +43,10 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   title,
   unit,
   points,
+  estimate,
+  estimateLabel,
+  breaks = [],
+  breakLabel,
   format = (v) => v.toFixed(1),
   emptyLabel,
 }) => {
@@ -37,14 +54,20 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   const [hover, setHover] = useState<number | null>(null);
 
   const geom = useMemo(() => {
-    const max = niceMax(Math.max(0, ...points.map((p) => p.value)));
+    const max = niceMax(
+      Math.max(
+        0,
+        ...points.map((p) => p.value),
+        ...(estimate ?? []).map((p) => p.value),
+      ),
+    );
     const iw = W - PAD.left - PAD.right;
     const ih = H - PAD.top - PAD.bottom;
     const x = (i: number) =>
       PAD.left + (points.length <= 1 ? iw / 2 : (i / (points.length - 1)) * iw);
     const y = (v: number) => PAD.top + ih - (v / max) * ih;
     return { max, x, y, ih };
-  }, [points]);
+  }, [points, estimate]);
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const svg = svgRef.current;
@@ -61,6 +84,25 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   const path = points
     .map((p, i) => `${i === 0 ? "M" : "L"}${geom.x(i)},${geom.y(p.value)}`)
     .join(" ");
+  const estimateByLabel = new Map(
+    (estimate ?? []).map((p) => [p.label, p.value]),
+  );
+  const hasEstimate = (estimate ?? []).some(
+    (p, i) => Math.abs(p.value - (points[i]?.value ?? p.value)) > 1e-9,
+  );
+  const estimatePath = hasEstimate
+    ? points
+        .map((p, i) => {
+          const v = estimateByLabel.get(p.label) ?? p.value;
+          return `${i === 0 ? "M" : "L"}${geom.x(i)},${geom.y(v)}`;
+        })
+        .join(" ")
+    : "";
+  const breakIndex = breaks
+    .map((b) => ({ ...b, i: points.findIndex((p) => p.label === b.label) }))
+    .filter((b) => b.i >= 0);
+  const hoveredBreaks =
+    hover !== null ? breakIndex.filter((b) => b.i === hover) : [];
   const ticks = [0, geom.max / 2, geom.max];
   const last = points[points.length - 1];
   const hovered = hover !== null ? points[hover] : null;
@@ -128,6 +170,33 @@ export const TrendChart: React.FC<TrendChartProps> = ({
               {last.label}
             </text>
           )}
+          {breakIndex.map((b) => (
+            <g key={`break-${b.label}-${b.detail}`}>
+              <line
+                x1={geom.x(b.i)}
+                x2={geom.x(b.i)}
+                y1={PAD.top}
+                y2={PAD.top + geom.ih}
+                stroke="var(--viz-break)"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+              />
+              <path
+                d={`M${geom.x(b.i) - 4},${PAD.top - 6} l4,5 l4,-5 z`}
+                fill="var(--viz-break)"
+              />
+            </g>
+          ))}
+          {hasEstimate && (
+            <path
+              d={estimatePath}
+              fill="none"
+              stroke="var(--viz-series-1)"
+              strokeOpacity={0.6}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+            />
+          )}
           <path
             d={path}
             fill="none"
@@ -172,6 +241,46 @@ export const TrendChart: React.FC<TrendChartProps> = ({
             {format(hovered.value)} {unit}
           </strong>
           <span className="text-ink-3"> · {hovered.label}</span>
+          {hasEstimate && estimateByLabel.has(hovered.label) && (
+            <div className="text-ink-3">
+              {estimateLabel}: {format(estimateByLabel.get(hovered.label) ?? 0)}{" "}
+              {unit}
+            </div>
+          )}
+          {hoveredBreaks.map((b) => (
+            <div key={b.detail} className="text-warning">
+              ⚠ {b.detail}
+            </div>
+          ))}
+        </div>
+      )}
+      {(hasEstimate || breakIndex.length > 0) && (
+        <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-ink-3">
+          {hasEstimate && (
+            <span className="flex items-center gap-1">
+              <svg width="16" height="4" aria-hidden="true">
+                <line
+                  x1="0"
+                  x2="16"
+                  y1="2"
+                  y2="2"
+                  stroke="var(--viz-series-1)"
+                  strokeOpacity={0.6}
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                />
+              </svg>
+              {estimateLabel}
+            </span>
+          )}
+          {breakIndex.length > 0 && (
+            <span className="flex items-center gap-1">
+              <svg width="10" height="8" aria-hidden="true">
+                <path d="M1,1 l4,5 l4,-5 z" fill="var(--viz-break)" />
+              </svg>
+              {breakLabel}
+            </span>
+          )}
         </div>
       )}
     </figure>

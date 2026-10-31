@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from handy_worker import __version__, transcribers
+from handy_worker import config as config_mod
 from handy_worker.paths import ConfigError, Paths, resolve
 
 #: Commands allowed to touch the network (the pinned model download only).
@@ -25,6 +26,7 @@ NETWORK_COMMANDS = {("model", "download"), ("spike", None)}
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
+EXIT_BLOCKED = 3  # needs attention (schema, model, environment)
 
 
 def _privacy_env(allow_download: bool) -> None:
@@ -48,6 +50,10 @@ def _paths(args: argparse.Namespace) -> Paths:
         app_data=Path(args.app_data) if args.app_data else None,
         log_dir=Path(args.log_dir) if args.log_dir else None,
     )
+
+
+def _config(paths: Paths) -> config_mod.WorkerConfig:
+    return config_mod.load(paths.config_file)
 
 
 def _print_json(data: Any) -> None:
@@ -114,6 +120,117 @@ def cmd_model(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# -- service -----------------------------------------------------------------
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    from handy_worker import runner, system
+
+    paths = _paths(args)
+    system.setup_logging(paths.log_file, args.verbose, to_stderr=not args.quiet)
+    cfg = _config(paths)
+    system.lower_priority()
+    name = args.transcriber or cfg.transcriber
+    r = runner.Runner(
+        paths,
+        cfg,
+        lambda: _make_transcriber(name, cfg.language, paths),
+        notifier=runner.file_notifier(paths.identity.product_name),
+        install_signal_handlers=True,
+    )
+    result = r.run(args.trigger)
+    if args.json:
+        _print_json(result.as_dict())
+    if result.outcome == runner.BLOCKED:
+        return EXIT_BLOCKED
+    if result.outcome == runner.ERROR:
+        return EXIT_FAILED
+    return EXIT_OK
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    from handy_worker import status
+
+    paths = _paths(args)
+    _print_json(status.collect(paths, _config(paths)))
+    return EXIT_OK
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    from handy_worker import launchd, system
+
+    paths = _paths(args)
+    system.setup_logging(paths.log_file, args.verbose)
+    cfg = _config(paths)
+    try:
+        info = launchd.install(paths, cfg, Path(args.python) if args.python else None)
+    except launchd.LaunchdError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_FAILED
+    logging.getLogger(__name__).info("Installed launchd agent %s", info["label"])
+    _print_json(info)
+    return EXIT_OK
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    from handy_worker import launchd
+
+    paths = _paths(args)
+    _print_json(launchd.uninstall(paths, purge=args.purge))
+    return EXIT_OK
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from handy_worker import doctor
+
+    paths = _paths(args)
+    checks = doctor.run_checks(paths, _config(paths), deep=not args.quick)
+    if args.json:
+        _print_json(doctor.as_json(checks))
+    else:
+        print(doctor.render(checks))
+    return EXIT_OK if all(c.status != doctor.FAIL for c in checks) else EXIT_FAILED
+
+
+def cmd_selftest(args: argparse.Namespace) -> int:
+    from handy_worker import doctor
+
+    paths = _paths(args)
+    problems = doctor.selftest(paths, _config(paths))
+    for p in problems:
+        print(f"selftest: {p}", file=sys.stderr)
+    if not problems:
+        print("selftest: ok")
+    return EXIT_OK if not problems else EXIT_FAILED
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    from handy_worker import results_db
+
+    paths = _paths(args)
+    db = results_db.ResultsDb.open(paths.results_db)
+    try:
+        n = db.retry_all_failed() if args.all_failed else int(db.retry(args.entry_id))
+    finally:
+        db.close()
+    _print_json({"requeued": n})
+    return EXIT_OK if n or args.all_failed else EXIT_FAILED
+
+
+def cmd_mark_synced(args: argparse.Namespace) -> int:
+    from handy_worker import versions
+
+    _print_json(versions.mark_synced(extras=args.extra or []))
+    return EXIT_OK
+
+
+def cmd_versions(args: argparse.Namespace) -> int:
+    from handy_worker import versions
+
+    _print_json(versions.report())
+    return EXIT_OK
+
+
 # -- parser ------------------------------------------------------------------
 
 
@@ -149,6 +266,52 @@ def build_parser() -> argparse.ArgumentParser:
     msub.add_parser("status", help="show what is on disk")
     m.set_defaults(func=cmd_model)
 
+    r = sub.add_parser("run", help="process the queue (idempotent)")
+    r.add_argument(
+        "--trigger",
+        choices=["launchd", "schedule", "login", "idle", "manual"],
+        default="manual",
+    )
+    r.add_argument("--transcriber", choices=transcribers.NAMES, help="override config")
+    r.add_argument("--json", action="store_true", help="print the run result as JSON")
+    r.add_argument("--quiet", action="store_true", help="log to the file only")
+    r.set_defaults(func=cmd_run)
+
+    st = sub.add_parser("status", help="print JSON status (last run, queue, failures, ...)")
+    st.set_defaults(func=cmd_status)
+
+    i = sub.add_parser("install", help="install/refresh the launchd agent")
+    i.add_argument("--python", help="interpreter for the agent (default: this checkout's .venv)")
+    i.set_defaults(func=cmd_install)
+
+    u = sub.add_parser("uninstall", help="remove the launchd agent (keeps data)")
+    u.add_argument(
+        "--purge",
+        action="store_true",
+        help="also delete the worker's own data (results, model, logs); never Handy's",
+    )
+    u.set_defaults(func=cmd_uninstall)
+
+    d = sub.add_parser("doctor", help="check everything the service needs, with fixes")
+    d.add_argument("--json", action="store_true")
+    d.add_argument("--quick", action="store_true", help="skip importing the model stack")
+    d.set_defaults(func=cmd_doctor)
+
+    t = sub.add_parser("selftest", help=argparse.SUPPRESS)
+    t.set_defaults(func=cmd_selftest)
+
+    rt = sub.add_parser("retry", help="re-queue a failed entry, or all of them")
+    g = rt.add_mutually_exclusive_group(required=True)
+    g.add_argument("entry_id", nargs="?", type=int, help="dictation-log entry id")
+    g.add_argument("--all-failed", action="store_true")
+    rt.set_defaults(func=cmd_retry)
+
+    ms = sub.add_parser("mark-synced", help=argparse.SUPPRESS)
+    ms.add_argument("--extra", action="append")
+    ms.set_defaults(func=cmd_mark_synced)
+
+    v = sub.add_parser("versions", help="worker/environment versions as JSON")
+    v.set_defaults(func=cmd_versions)
     return p
 
 
@@ -157,11 +320,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     sub = getattr(args, "model_command", None) if args.command == "model" else None
     _privacy_env((args.command, sub) in NETWORK_COMMANDS)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
-    )
+    if args.command not in ("run", "install"):
+        logging.basicConfig(
+            level=logging.DEBUG if args.verbose else logging.WARNING,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            stream=sys.stderr,
+        )
     try:
         return int(args.func(args))
     except ConfigError as e:

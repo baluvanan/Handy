@@ -219,6 +219,8 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(history_manager.clone());
     app_handle.manage(tray::TrayState::new());
     app_handle.manage(TranscriptionJobManager::new(app_handle));
+    // Fork: "recording active" flag + the background verbatim service.
+    personal::verbatim_service::init(app_handle);
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -684,6 +686,16 @@ pub fn run(cli_args: CliArgs) {
             personal::settings::update_personal_settings,
             personal::insights::get_speech_insights,
             personal::insights::generate_coaching_note,
+            personal::insights::recompute_speech_metrics,
+            personal::verbatim_service::get_verbatim_service_status,
+            personal::verbatim_service::update_verbatim_service_settings,
+            personal::verbatim_service::verbatim_run_now,
+            personal::verbatim_service::verbatim_retry,
+            personal::verbatim_service::verbatim_fix,
+            personal::verbatim_service::verbatim_doctor,
+            personal::verbatim_service::verbatim_reveal_logs,
+            personal::verbatim_service::retention_preview,
+            personal::verbatim_service::get_coaching_notes,
             personal::profiles::get_recent_app_ids,
             shortcut::change_paste_method_setting,
             shortcut::get_available_typing_tools,
@@ -800,6 +812,7 @@ pub fn run(cli_args: CliArgs) {
             transcription_coordinator::RecordingStateEvent,
             actions::TranscriptionCompleteEvent,
             personal::notice::PersonalNotice,
+            personal::verbatim_service::VerbatimServiceChanged,
         ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
@@ -1151,7 +1164,6 @@ pub fn run(cli_args: CliArgs) {
     apply_startup_activation_policy(&mut app, headless_mode);
 
     // `app` is only used by the macOS arm.
-    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     app.run(|app, event| match &event {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
@@ -1170,6 +1182,8 @@ pub fn run(cli_args: CliArgs) {
             }
             show_main_window(app);
         }
+        // Fork: don't leave the "recording active" flag behind on quit.
+        tauri::RunEvent::Exit => personal::busy::clear(app),
         // No transcription teardown on exit: transcribe.cpp runs only in the
         // worker process, which exits by itself as soon as this process's end
         // of its stdin closes, even if it is hung. Waiting on an unload here

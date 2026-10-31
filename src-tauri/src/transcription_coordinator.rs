@@ -725,6 +725,8 @@ fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
             hotkey_string,
         } => {
             let started = start(app, &binding_id, &hotkey_string);
+            // Fork: tell the verbatim worker to yield now (non-blocking).
+            crate::personal::busy::nudge();
             state.on_start_result(&binding_id, started);
             if started {
                 emit_recording_phase(app, RecordingPhase::Started);
