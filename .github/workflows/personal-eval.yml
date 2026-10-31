@@ -1,0 +1,27 @@
+name: "personal-eval"
+# Handy Personal: checks the evaluation harness (WER scoring + the full
+# pipeline over eval/samples, driven by a fake transcriber so no model
+# download is needed).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "eval/**"
+      - ".github/workflows/personal-eval.yml"
+  pull_request:
+    paths:
+      - "eval/**"
+      - ".github/workflows/personal-eval.yml"
+
+jobs:
+  eval-harness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit + pipeline tests
+        run: python -m unittest discover -s eval -v
+      - name: Smoke run over the sample clips (fake transcriber)
+        run: python eval/run_eval.py --handy "python eval/fake_handy.py" --max-wer 0 -v
